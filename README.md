@@ -1,5 +1,3 @@
-# qpaste
-
 # QuickPaste 
 
 QuickPaste ist eine Windows-Anwendung, die es ermöglicht, vordefinierte Texte per Tastenkombination (Hotkeys) oder über eine grafische Benutzeroberfläche (GUI) einzufügen. Die Anwendung ist ideal für den schnellen Zugriff auf Standardtexte.
