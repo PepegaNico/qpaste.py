@@ -1,52 +1,50 @@
-# QuickPaste 
+# QuickPaste  
 
-QuickPaste ist eine Windows-Anwendung, die es ermöglicht, vordefinierte Texte per Tastenkombination (Hotkeys) oder über eine grafische Benutzeroberfläche (GUI) einzufügen. Die Anwendung ist ideal für den schnellen Zugriff auf Standardtexte.
+QuickPaste is a Windows application that allows you to insert predefined text using keyboard shortcuts (hotkeys) or a graphical user interface (GUI).  
+The application is ideal for quickly accessing frequently used text snippets.  
 
-## Features
+## Features  
 
-- **Hotkey-Unterstützung**: Füge Texte mit Strg+Shift+Zahl ein.
-- **Eigene Texte & Hotkeys verwalten**: Texte und Hotkeys können in der Anwendung geändert und gespeichert werden.
-- **Einträge hinzufügen**: Neue Texte können über einen Button hinzugefügt werden.
-- **Einträge löschen**: Nicht mehr benötigte Einträge lassen sich einfach entfernen.
+- **Hotkey Support**: Insert text using `Ctrl + Shift + Number`.  
+- **Manage Custom Text & Hotkeys**: Modify and save text snippets and hotkeys within the application.  
+- **Add New Entries**: Easily add new text snippets via the GUI.  
+- **Delete Entries**: Remove unused text entries with a single click.  
 
-## Installation
+## Installation  
 
-1. Stelle sicher, dass Python 3.10 oder höher installiert ist.
-2. Installiere die benötigten Abhängigkeiten mit folgendem Befehl:
+1. Ensure that **Python 3.10 or later** is installed.  
+2. Install the required dependencies with the following command:  
    ```sh
    pip install pyperclip keyboard
    ```
 
-## Nutzung
+## Usage
 
-1. Starte das Skript mit:
+1. Start the script with:
    ```sh
    python qp.py
    ```
-2. Die Anwendung öffnet sich und ist einsatzbereit.
-3. Texte können über die GUI oder definierte Hotkeys eingefügt werden.
+2. The application will launch and be ready to use.
+3. Text can be inserted via the GUI or predefined hotkeys.
 
-## Hotkeys (Standardmäßig gesetzt)
+## Default Hotkeys
 
 ```
-Strg + Shift + 1  → Text 1 einfügen
-Strg + Shift + 2  → Text 2 einfügen
-...
-Strg + Shift + Q  → Text 11 einfügen
-Strg + Shift + W  → Text 12 einfügen
+Strg + Shift + 1  → Insert Text 1
+Strg + Shift + 2  → Insert Text 2
 ```
 
-Die Hotkeys können in der Anwendung angepasst werden.
+Hotkeys can be customized within the application.
 
-## Fehlerbehebung
+## Troubleshooting
 
-Falls die Hotkeys nicht funktionieren:
+If hotkeys are not working:
 
-1. Prüfe, ob die `keyboard`-Bibliothek korrekt installiert ist:
+1. Check if the `keyboard` library is installed correctly:
    ```sh
    python -c "import keyboard; print(keyboard.__version__)"
    ```
-2. Falls nötig, reinstalliere `keyboard`:
+2. If necessary, reinstall `keyboard`:
    ```sh
    pip install --force-reinstall keyboard
    ```
