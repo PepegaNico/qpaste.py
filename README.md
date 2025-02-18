@@ -6,6 +6,8 @@ QuickPaste ist eine Windows-Anwendung, die es ermöglicht, vordefinierte Texte p
 
 - **Hotkey-Unterstützung**: Füge Texte mit Strg+Shift+Zahl ein.
 - **Eigene Texte & Hotkeys verwalten**: Texte und Hotkeys können in der Anwendung geändert und gespeichert werden.
+- **Einträge hinzufügen**: Neue Texte können über einen Button hinzugefügt werden.
+- **Einträge löschen**: Nicht mehr benötigte Einträge lassen sich einfach entfernen.
 
 ## Installation
 
