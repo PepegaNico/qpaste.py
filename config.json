@@ -9,17 +9,7 @@
         "Titel 7",
         "Titel 8",
         "Titel 9",
-        "Titel 10",
-        "Titel 11",
-        "Titel 12",
-        "Titel 13",
-        "Titel 14",
-        "Titel 15",
-        "Titel 16",
-        "Titel 17",
-        "Titel 18",
-        "Titel 19",
-        "Titel 20"
+        "Titel 10"
     ],
     "texts": [
         "Text 1",
@@ -31,17 +21,7 @@
         "Text 7",
         "Text 8",
         "Text 9",
-        "Text 10",
-        "Text 11",
-        "Text 12",
-        "Text 13",
-        "Text 14",
-        "Text 15",
-        "Text 16",
-        "Text 17",
-        "Text 18",
-        "Text 19",
-        "Text 20"
+        "Text 10"
     ],
     "hotkeys": [
         "ctrl+shift+1",
@@ -53,16 +33,6 @@
         "ctrl+shift+7",
         "ctrl+shift+8",
         "ctrl+shift+9",
-        "ctrl+shift+0",
-        "ctrl+shift+q",
-        "ctrl+shift+w",
-        "ctrl+shift+e",
-        "ctrl+shift+r",
-        "ctrl+shift+t",
-        "ctrl+shift+y",
-        "ctrl+shift+u",
-        "ctrl+shift+i",
-        "ctrl+shift+o",
-        "ctrl+shift+p"
+        "ctrl+shift+0"
     ]
 }
