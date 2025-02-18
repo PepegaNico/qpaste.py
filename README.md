@@ -1,4 +1,6 @@
-# QuickPaste  
+## **QuickPaste – Fast Clipboard Tool for Windows** 
+
+## Description
 
 QuickPaste is a Windows application that allows you to insert predefined text using keyboard shortcuts (hotkeys) or a graphical user interface (GUI).  
 The application is ideal for quickly accessing frequently used text snippets.  
@@ -38,16 +40,23 @@ Hotkeys can be customized within the application.
 
 ## Troubleshooting
 
-If hotkeys are not working:
-
-1. Check if the `keyboard` library is installed correctly:
+### Hotkeys not working?  
+- Ensure **no other application is using the same shortcuts**
+- Check if the `keyboard` library is installed correctly:
    ```sh
    python -c "import keyboard; print(keyboard.__version__)"
    ```
-2. If necessary, reinstall `keyboard`:
+
+- If necessary, reinstall `keyboard`:
    ```sh
    pip install --force-reinstall keyboard
    ```
+
+
+
+If you encounter bugs or have suggestions, please create an issue on GitHub:  
+[GitHub Issues](https://github.com/PepegaNico/qpaste/issues)  
+
 
 
 
