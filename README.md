@@ -55,7 +55,7 @@ Hotkeys can be customized within the application.
 
 
 If you encounter bugs or have suggestions, please create an issue on GitHub:  
-[GitHub Issues](https://github.com/PepegaNico/qpaste/issues)  
+[GitHub Issues](https://github.com/PepegaNico/qpaste.py/issues)  
 
 
 
