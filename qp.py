@@ -102,7 +102,6 @@ def quit_application(icon, item):
         try:
             tray_icon.stop()
         except Exception as e:
-            print(f"Fehler beim Beenden des Tray-Icons: {e}")
 
     root.quit()
     root.destroy()
@@ -169,7 +168,7 @@ def save_data():
         data["texts"] = [entry.get() for entry in text_entries if entry.winfo_exists()]
         data["hotkeys"] = [entry.get() for entry in hotkey_entries if entry.winfo_exists()]
     except Exception as e:
-        print(f"Fehler beim Speichern der Daten: {e}")
+
         return
 
     # Speichern in die JSON-Datei
