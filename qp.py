@@ -95,6 +95,7 @@ def quit_application(icon, item):
         try:
             tray_icon.stop()
         except Exception as e:
+            print(f"Fehler beim Stoppen des Tray-Icons: {e}")
 
     root.quit()
     root.destroy()
