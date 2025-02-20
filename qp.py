@@ -52,16 +52,24 @@ def insert_text(index):
     keyboard.send("ctrl+v")
 
 def register_hotkeys():
+    erlaubte_zeichen = "befhmpqvxz§'^"
+
     for hotkey in list(keyboard._hotkeys.copy()):
         try:
             keyboard.remove_hotkey(hotkey)
         except KeyError:
             pass  
 
-
     for i, hotkey in enumerate(data["hotkeys"]):
         if hotkey.strip():  
-            keyboard.add_hotkey(hotkey, insert_text, args=[i], suppress=True)
+            keys = hotkey.lower().split("+")
+            if (
+                len(keys) == 3 
+                and "ctrl" in keys 
+                and "shift" in keys 
+                and keys[2] in erlaubte_zeichen  
+            ):
+                keyboard.add_hotkey(hotkey, insert_text, args=[i], suppress=True)
 
 tray_icon = None 
 
@@ -95,21 +103,22 @@ def quit_application(icon, item):
         try:
             tray_icon.stop()
         except Exception as e:
-            print(f"Fehler beim Stoppen des Tray-Icons: {e}")
+            print(f"Fehler beim Stoppen des Tray-Icons: {e}")  
 
     root.quit()
     root.destroy()
     sys.exit(0)
 
+
 def add_new_entry():
-    """Fügt einen neuen leeren Eintrag im Bearbeitungsmodus hinzu, ohne den Modus zu verlassen."""
+
     data["titles"].append("Neuer Eintrag")
     data["texts"].append("Neuer Text")
     data["hotkeys"].append("ctrl+shift+")  
     update_ui()  
     
 def delete_entry(index):
-    """Löscht einen Eintrag im Bearbeitungsmodus, ohne die UI zu verlassen."""
+
     if len(data["titles"]) > 1:  
         del data["titles"][index]
         del data["texts"][index]
@@ -130,7 +139,7 @@ root.protocol("WM_DELETE_WINDOW", lambda: minimize_to_tray())
 
 
 def force_taskbar_icon():
-    """Erzwingt das Laden des Taskleisten-Icons nach einer Verzögerung."""
+
     root.after(500, lambda: root.iconbitmap("H.ico")) 
 
 edit_mode = False
