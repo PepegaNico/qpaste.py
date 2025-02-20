@@ -43,8 +43,6 @@ def load_window_geometry():
             pass
     return None
 
-
-
 def insert_text(index):
     text = data["texts"][index]
     pyperclip.copy(text)
@@ -109,16 +107,15 @@ def quit_application(icon, item):
     root.destroy()
     sys.exit(0)
 
-
 def add_new_entry():
-    """Fügt einen neuen leeren Eintrag im Bearbeitungsmodus hinzu, ohne den Modus zu verlassen."""
+
     data["titles"].append("Neuer Eintrag")
     data["texts"].append("Neuer Text")
     data["hotkeys"].append("ctrl+shift+")  
     update_ui()  
     
 def delete_entry(index):
-    """Löscht einen Eintrag im Bearbeitungsmodus, ohne die UI zu verlassen."""
+
     if len(data["titles"]) > 1:  
         del data["titles"][index]
         del data["texts"][index]
@@ -137,9 +134,8 @@ root.iconbitmap("H.ico")
 root.title("QuickPaste")
 root.protocol("WM_DELETE_WINDOW", lambda: minimize_to_tray())
 
-
 def force_taskbar_icon():
-    """Erzwingt das Laden des Taskleisten-Icons nach einer Verzögerung."""
+
     root.after(500, lambda: root.iconbitmap("H.ico")) 
 
 edit_mode = False
