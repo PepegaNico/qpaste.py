@@ -1,0 +1,78 @@
+{
+    "profiles": {
+        "KBA": {
+            "titles": [
+                "SC cancellation",
+                "Titel 2",
+                "Titel 3",
+                "Titel 4",
+                "Titel 5",
+                "Titel 7",
+                "Neuer Eintrag",
+                "Neuer Eintrag",
+                "Neuer Eintrag"
+            ],
+            "texts": [
+                "Sicherheitsfragen wurden \u00fcberpr\u00fcft \nLogin mit neuem Windows Passwort erfolgriech\n\nTicket wird geschlossen",
+                "Text 2",
+                "Text 3",
+                "Text 4",
+                "Text 5",
+                "Text 7",
+                "Neuer Text",
+                "Neuer Text",
+                "Neuer Text"
+            ],
+            "hotkeys": [
+                "ctrl+shift+1",
+                "ctrl+shift+2",
+                "ctrl+shift+3",
+                "ctrl+shift+4",
+                "ctrl+shift+5",
+                "ctrl+shift+7",
+                "ctrl+shift+6",
+                "ctrl+shift+8",
+                "ctrl+shift+9"
+            ]
+        },
+        "Tickets": {
+            "titles": [
+                "Titel 1",
+                "Titel 2",
+                "Titel 3",
+                "Titel 4",
+                "Titel 5",
+                "Titel 6",
+                "Titel 7",
+                "Titel 8",
+                "Titel 9",
+                "Titel 10"
+            ],
+            "texts": [
+                "Profil 2 Text 1",
+                "Profil 2 Text 2",
+                "Profil 2 Text 3",
+                "Profil 2 Text 4",
+                "Profil 2 Text 5",
+                "Profil 2 Text 6",
+                "Profil 2 Text 7",
+                "Profil 2 Text 8",
+                "Profil 2 Text 9",
+                "Profil 2 Text 10"
+            ],
+            "hotkeys": [
+                "ctrl+shift+1",
+                "ctrl+shift+2",
+                "ctrl+shift+3",
+                "ctrl+shift+4",
+                "ctrl+shift+5",
+                "ctrl+shift+6",
+                "ctrl+shift+7",
+                "ctrl+shift+8",
+                "ctrl+shift+9",
+                "ctrl+shift+0"
+            ]
+        }
+    },
+    "active_profile": "KBA"
+}
