@@ -1,0 +1,51 @@
+{
+    "profiles": {
+        "Profil 1": {
+            "titles": [
+                "Titel 1",
+                "Titel 2",
+                "Titel 3",
+                "Titel 4",
+                "Titel 5"
+            ],
+            "texts": [
+                "Text 1",
+                "Text 2",
+                "Text 3",
+                "Text 4",
+                "Text 5"
+            ],
+            "hotkeys": [
+                "ctrl+shift+1",
+                "ctrl+shift+2",
+                "ctrl+shift+3",
+                "ctrl+shift+4",
+                "ctrl+shift+5"
+            ]
+        },
+        "Profil 2": {
+            "titles": [
+                "Titel 1",
+                "Titel 2",
+                "Titel 3",
+                "Titel 4",
+                "Titel 5"
+            ],
+            "texts": [
+                "Profil 2 Text 1",
+                "Profil 2 Text 2",
+                "Profil 2 Text 3",
+                "Profil 2 Text 4",
+                "Profil 2 Text 5"
+            ],
+            "hotkeys": [
+                "ctrl+shift+1",
+                "ctrl+shift+2",
+                "ctrl+shift+3",
+                "ctrl+shift+4",
+                "ctrl+shift+5"
+            ]
+        }
+    },
+    "active_profile": "Profil 1"
+}
