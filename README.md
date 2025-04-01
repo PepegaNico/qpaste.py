@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/a702dcad-4efe-439d-8030-4170859dbb37" alt="QuickPaste Banner" width="400"/>
+</p>
+
 ## **QuickPaste – Fast Clipboard Tool for Windows** 
 
 ## Description
