@@ -1,0 +1,5 @@
+{
+    "titles": ["Titel 1", "Titel 2"],
+    "texts": ["Standardantwort 1", "Standardantwort 2"],
+    "hotkeys": ["ctrl+shift+1", "ctrl+shift+2"]
+  }
