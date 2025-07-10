@@ -10,6 +10,8 @@ import threading
 import sys
 import os
 import logging
+import psutil
+
 
 APPDATA_PATH = os.path.join(os.environ["APPDATA"], "QuickPaste")
 os.makedirs(APPDATA_PATH, exist_ok=True)
@@ -25,6 +27,9 @@ unsaved_changes = False
 dragged_index = None
 current_target = None
 logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", encoding="utf-8")
+hotkeys_enabled = True
+registered_hotkeys = []
+hotkeys_var = None
 
 #region data
 
@@ -251,7 +256,10 @@ def insert_text(index):
         return
     pyperclip.copy(text)
     time.sleep(0.1)
-    keyboard.send("ctrl+v")
+    if is_outlook_active():
+        keyboard.write(pyperclip.paste())
+    else:
+        keyboard.send("ctrl+v")
 
 def register_hotkeys():
     if active_profile in data["profiles"]:
@@ -262,11 +270,27 @@ def register_hotkeys():
             except Exception:
                 pass
         registered_hotkey_refs.clear()
+
+        if not hotkeys_enabled:
+            return
+
+
+
     erlaubte_zeichen = "1234567890befhmpqvxz§'^"
     belegte_hotkeys = set()
     fehlerhafte_hotkeys = False
     data["profiles"].setdefault(active_profile, {}).setdefault("hotkeys", [])
+   
+   
+   
     def hotkey_handler(index):
+
+#new
+        if not hotkeys_enabled:
+            return
+
+
+
         gedrückte_tasten = keyboard._pressed_events.keys()
         pfeiltasten = {72, 80, 75, 77}  
         if any(key in gedrückte_tasten for key in pfeiltasten):
@@ -324,11 +348,17 @@ def create_tray_icon():
     tray_icon = Icon("QuickPaste", image, menu=Menu(
         *profile_items,
         Menu.SEPARATOR,
+        MenuItem("Hotkeys aktivieren", toggle_hotkeys_from_tray, checked=lambda item: hotkeys_enabled),
+        Menu.SEPARATOR,
         MenuItem("↑ Öffnen", show_window),
         MenuItem("✖ Beenden", quit_application)
     ))
     tray_thread = threading.Thread(target=tray_icon.run, daemon=True)
     tray_thread.start()
+
+
+
+
 
 def refresh_tray():
     global tray_icon
@@ -359,6 +389,17 @@ def quit_application(icon, item):
     root.quit()
     root.destroy()
     sys.exit(0)
+
+
+
+def toggle_hotkeys_from_tray(icon, item):
+    global hotkeys_enabled
+    hotkeys_enabled = not hotkeys_enabled
+    hotkey_checkbox_var.set(hotkeys_enabled)  # ✔ UI aktualisieren
+    register_hotkeys()                         # ✔ Hotkeys neu laden
+    refresh_tray()
+
+
 
 #endregion
 
@@ -581,6 +622,7 @@ active_profile = data.get("active_profile", list(data["profiles"].keys())[0])
 def update_ui():
     global profile_buttons, profile_entries, title_labels, scrollable_frame, canvas, edit_mode
     global active_profile
+    global hotkey_checkbox_var
     is_read_only = active_profile == "SDE"
     is_sde_only = len([p for p in data["profiles"].keys() if p != "SDE"]) == 0 and "SDE" in data["profiles"]
     bg_color = "#2e2e2e" if dark_mode else "SystemButtonFace"
@@ -621,10 +663,32 @@ def update_ui():
             btn = tk.Button(frame, text=profile, command=lambda p=profile: switch_profile(p), bg=button_bg, fg=fg_color, activebackground=button_bg, activeforeground=fg_color, font=("Arial", 10, "bold") if profile == active_profile else ("Arial", 10, "normal"))
             btn.pack(side="left", padx=3)
             profile_buttons[profile] = btn
+
+
+
+            
     settings_icon = tk.Button(top_frame, text="🔧", command=toggle_edit_mode, width=3, bg=button_bg, fg=fg_color)
     settings_icon.pack(side="right", padx=5, pady=5)
+
+
+
     dark_mode_button = tk.Button(top_frame, text="🌑" if not dark_mode else "🌞", command=toggle_dark_mode, bg=button_bg, fg=fg_color)
     dark_mode_button.pack(side="right", padx=5)
+
+    hotkey_checkbox_var = tk.BooleanVar(value=hotkeys_enabled)
+    hotkey_checkbox = tk.Checkbutton(
+        top_frame,
+        text="Hotkeys aktiv",
+        variable=hotkey_checkbox_var,
+        command=lambda: toggle_hotkeys_from_ui(hotkey_checkbox_var.get()),
+        bg=bg_color,
+        fg=fg_color,
+        selectcolor=bg_color
+    )
+    hotkey_checkbox.pack(side="right", padx=5, pady=5)
+
+
+
     if edit_mode:
         add_profile_btn = tk.Button(top_frame, text="➕ Profil", command=lambda: confirm_and_then(add_new_profile), bg=button_bg, fg=fg_color)
         add_profile_btn.pack(side="right", padx=5)
@@ -650,6 +714,10 @@ def update_ui():
     canvas.bind("<Leave>", lambda e: root.unbind_all("<MouseWheel>"))
     root.columnconfigure(0, weight=1)
     root.rowconfigure(1, weight=1)
+
+
+
+
     global title_entries, text_entries, hotkey_entries
     title_entries, text_entries, hotkey_entries = [], [], []
     titles = data["profiles"][active_profile]["titles"]
@@ -717,6 +785,17 @@ def update_ui():
 
 #endregion
 
+def toggle_hotkeys_from_ui(value):
+    global hotkeys_enabled
+    hotkeys_enabled = value
+    if hotkey_checkbox_var.get() != value:
+        hotkey_checkbox_var.set(value)
+
+    # NEU: Bei Änderung Hotkeys neu registrieren bzw. entfernen
+    register_hotkeys()
+    refresh_tray()
+
+
 #region darkmode
 
 def toggle_dark_mode():
@@ -724,6 +803,16 @@ def toggle_dark_mode():
     dark_mode = not dark_mode
     update_ui()
     save_window_position()  
+
+#endregion
+
+#region Outlook
+
+def is_outlook_active():
+    for proc in psutil.process_iter(['name']):
+        if proc.info['name'] and proc.info['name'].lower() == "outlook.exe":
+            return True
+    return False
 
 #endregion
 
