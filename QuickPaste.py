@@ -10,7 +10,6 @@ import threading
 import sys
 import os
 import logging
-import psutil
 
 
 APPDATA_PATH = os.path.join(os.environ["APPDATA"], "QuickPaste")
@@ -28,8 +27,6 @@ dragged_index = None
 current_target = None
 logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", encoding="utf-8")
 hotkeys_enabled = True
-registered_hotkeys = []
-hotkeys_var = None
 
 #region data
 
@@ -256,10 +253,7 @@ def insert_text(index):
         return
     pyperclip.copy(text)
     time.sleep(0.1)
-    if is_outlook_active():
-        keyboard.write(pyperclip.paste())
-    else:
-        keyboard.send("ctrl+v")
+    keyboard.send("ctrl+v")
 
 def register_hotkeys():
     if active_profile in data["profiles"]:
@@ -270,27 +264,11 @@ def register_hotkeys():
             except Exception:
                 pass
         registered_hotkey_refs.clear()
-
-        if not hotkeys_enabled:
-            return
-
-
-
     erlaubte_zeichen = "1234567890befhmpqvxz§'^"
     belegte_hotkeys = set()
     fehlerhafte_hotkeys = False
     data["profiles"].setdefault(active_profile, {}).setdefault("hotkeys", [])
-   
-   
-   
     def hotkey_handler(index):
-
-#new
-        if not hotkeys_enabled:
-            return
-
-
-
         gedrückte_tasten = keyboard._pressed_events.keys()
         pfeiltasten = {72, 80, 75, 77}  
         if any(key in gedrückte_tasten for key in pfeiltasten):
@@ -315,16 +293,20 @@ def register_hotkeys():
             if hotkey in belegte_hotkeys:
                 messagebox.showerror("Fehler", f"Hotkey \"{hotkey}\" wird bereits verwendet!")
                 fehlerhafte_hotkeys = True  
-                continue 
-            belegte_hotkeys.add(hotkey) 
+                continue  
             if i >= len(data["profiles"][active_profile]["texts"]):
                 logging.warning(f"⚠ Hotkey '{hotkey}' zeigt auf Eintrag {i+1}, aber dieser existiert nicht im Profil '{active_profile}'")
                 continue
-            def make_handler(i):
-                return lambda: hotkey_handler(i)
-            ref = keyboard.add_hotkey(hotkey, make_handler(i), suppress=True)
+
+            def wrapped_handler(index=i, keys=keys):
+                pressed = keyboard._pressed_events
+                if all(keyboard.is_pressed(k) for k in keys):
+                    insert_text(index)
+            ref = keyboard.add_hotkey(hotkey, wrapped_handler, suppress=True)
+
             registered_hotkey_refs.append(ref)
     return fehlerhafte_hotkeys
+
 
 #endregion
 
@@ -348,7 +330,7 @@ def create_tray_icon():
     tray_icon = Icon("QuickPaste", image, menu=Menu(
         *profile_items,
         Menu.SEPARATOR,
-        MenuItem("Hotkeys aktivieren", toggle_hotkeys_from_tray, checked=lambda item: hotkeys_enabled),
+        MenuItem("Hotkeys aktiv", toggle_hotkeys_from_tray, checked=lambda item: hotkeys_enabled),
         Menu.SEPARATOR,
         MenuItem("↑ Öffnen", show_window),
         MenuItem("✖ Beenden", quit_application)
@@ -665,14 +647,15 @@ def update_ui():
             profile_buttons[profile] = btn
 
 
-
-            
+    help_button = tk.Button(top_frame, text="❓", command=show_help_dialog, bg=button_bg, fg=fg_color)
+    help_button.pack(side="right", padx=5)
+                    
     settings_icon = tk.Button(top_frame, text="🔧", command=toggle_edit_mode, width=3, bg=button_bg, fg=fg_color)
     settings_icon.pack(side="right", padx=5, pady=5)
 
 
 
-    dark_mode_button = tk.Button(top_frame, text="🌑" if not dark_mode else "🌞", command=toggle_dark_mode, bg=button_bg, fg=fg_color)
+    dark_mode_button = tk.Button(top_frame, text="☾" if not dark_mode else "🔆", command=toggle_dark_mode, bg=button_bg, fg=fg_color)
     dark_mode_button.pack(side="right", padx=5)
 
     hotkey_checkbox_var = tk.BooleanVar(value=hotkeys_enabled)
@@ -795,6 +778,33 @@ def toggle_hotkeys_from_ui(value):
     register_hotkeys()
     refresh_tray()
 
+#region help 
+
+def show_help_dialog():
+
+    help_text = (
+        "QuickPaste Hilfe\n\n"
+        "Wichtig: In Outlook kann es vorkommen, dass die Tastenkombination (z. B. Ctrl + Shift + 1) nicht sofort reagiert.\n"
+        "Stellen Sie sicher, dass Sie die Zahl direkt nach 'Ctrl + Shift' drücken und versuchen Sie es ein zweites Mal.\n\n"
+
+        "• Hotkeys aktiv: Aktiviert/Deaktiviert die Tastenkombinationen.\n"
+        "   Wenn deaktiviert, greifen Windows Standardfunktionen.\n\n"
+        "• ☾ / 🔆 Dunkelmodus: Wechselt zwischen hell/dunkel.\n\n"
+        "• 🔧 Bearbeiten: Titel, Texte und Hotkeys anpassen.\n\n"
+        "• ➕ Profil: Neues Textprofil erstellen.\n"
+        "• 🖊 Bearbeiten: Profilnamen ändern.\n"
+        "• ❌ Löschen: Profil entfernen (ausser SDE).\n\n"
+        "• ↕ Verschieben: Einträge per Drag & Drop umsortieren.\n"
+        "• ❌ Eintrag löschen: Klick auf ❌ neben dem Eintrag.\n"
+        "• ➕ Eintrag: Neuer Eintrag hinzufügen.\n"
+        "• 💾 Speichern: Änderungen sichern.\n\n"
+        "Bei Fragen oder Problemen: nico.wagner@bit.admin.ch"
+    )
+
+    tk.messagebox.showinfo("QuickPaste Hilfe", help_text)
+
+#endregion
+
 
 #region darkmode
 
@@ -806,15 +816,6 @@ def toggle_dark_mode():
 
 #endregion
 
-#region Outlook
-
-def is_outlook_active():
-    for proc in psutil.process_iter(['name']):
-        if proc.info['name'] and proc.info['name'].lower() == "outlook.exe":
-            return True
-    return False
-
-#endregion
 
 saved_geometry = load_window_position()
 if saved_geometry:
