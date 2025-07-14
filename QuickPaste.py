@@ -10,6 +10,8 @@ import threading
 import sys
 import os
 import logging
+import win32clipboard
+import win32con
 
 
 APPDATA_PATH = os.path.join(os.environ["APPDATA"], "QuickPaste")
@@ -251,9 +253,15 @@ def insert_text(index):
     except IndexError:
         logging.exception(f"Kein Text vorhanden für Hotkey-Index {index} im Profil '{active_profile}'")
         return
-    pyperclip.copy(text)
-    time.sleep(0.1)
-    keyboard.send("ctrl+v")
+
+    if text.startswith("http://") or text.startswith("https://") or "<a " in text.lower():
+        set_clipboard_html(text)
+        time.sleep(0.1)
+        keyboard.send("ctrl+v")
+    else:
+        pyperclip.copy(text)
+        time.sleep(0.1)
+        keyboard.send("ctrl+v")
 
 def register_hotkeys():
     if active_profile in data["profiles"]:
@@ -804,6 +812,29 @@ def show_help_dialog():
     tk.messagebox.showinfo("QuickPaste Hilfe", help_text)
 
 #endregion
+
+
+def set_clipboard_html(html_text):
+    # Formatieren nach HTML Clipboard Format (basierend auf MSDN-Spezifikation)
+    html_clipboard = (
+        "Version:0.9\r\n"
+        "StartHTML:00000097\r\n"
+        "EndHTML:{end_html:08d}\r\n"
+        "StartFragment:00000131\r\n"
+        "EndFragment:{end_fragment:08d}\r\n"
+        "<html><body><!--StartFragment-->{html}<!--EndFragment--></body></html>"
+    )
+    html_data = html_clipboard.format(
+        html=html_text,
+        end_html=97 + len(html_text) + 78,
+        end_fragment=131 + len(html_text)
+    )
+    win32clipboard.OpenClipboard()
+    win32clipboard.EmptyClipboard()
+    win32clipboard.SetClipboardData(win32con.CF_TEXT, html_data.encode("utf-8"))
+    win32clipboard.SetClipboardData(win32clipboard.RegisterClipboardFormat("HTML Format"), html_data.encode("utf-8"))
+    win32clipboard.CloseClipboard()
+
 
 
 #region darkmode
