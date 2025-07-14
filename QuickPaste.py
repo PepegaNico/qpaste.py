@@ -30,6 +30,119 @@ current_target = None
 logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", encoding="utf-8")
 hotkeys_enabled = True
 
+
+#region Hyperlink
+
+def make_rtf_hyperlink(url: str, display: str) -> str:
+    esc = display.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    return (
+        r"{\field{\*\fldinst{HYPERLINK \"" + url + r"\"}}"
+        r"{\fldrslt{" + esc + r"}}}"
+    )
+
+def set_clipboard_rtf(rtf_body: str, plain: str):
+    # Umhülle den Body
+    full = r"{\rtf1\ansi " + rtf_body + "}"
+    try:
+        data_bytes = full.encode("cp1252", errors="replace")
+    except:
+        data_bytes = full.encode("utf-8", errors="ignore")
+    win32clipboard.OpenClipboard()
+    try:
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, plain)
+        cf = win32clipboard.RegisterClipboardFormat("Rich Text Format")
+        win32clipboard.SetClipboardData(cf, data_bytes)
+    finally:
+        win32clipboard.CloseClipboard()
+
+def html_to_rtf_fragment(html: str) -> str:
+    """
+    Übersetzt alle <a href="URL">Text</a> in RTF-Felder, und entfernt
+    Backslashes/Klammern korrekt. Gibt nur den RTF-Body zurück, ohne
+    den {\rtf1…}-Wrapper.
+    """
+    # 1) Escape reiner Text (Backslashes und geschweifte Klammern)
+    esc = html.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+    # 2) Ersetze nacheinander alle Links
+    def repl_link(m):
+        url, txt = m.group(1), m.group(2)
+        # baue RTF-Hyperlink-Feld
+        disp = txt.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        return (
+            r"{\field{\*\fldinst{HYPERLINK \"" + url + r"\"}}"
+            r"{\fldrslt{" + disp + r"}}}"
+        )
+    esc = re.sub(r'<a\s+href="([^"]+)">(.*?)</a>', repl_link, esc, flags=re.DOTALL)
+
+    return esc
+
+import tkinter as tk
+from tkinter import simpledialog, messagebox
+import re
+def open_format_dialog(idx):
+    # Popup öffnen
+    dlg = tk.Toplevel(root)
+    dlg.iconbitmap(ICON_PATH) 
+    dlg.transient(root)
+    dlg.grab_set()
+    dlg.focus_set()
+    dlg.title("Hyperlink einfügen")
+
+    # Haupt‑Save-Button deaktivieren
+    save_button.config(state="disabled")
+
+
+
+    # 2) Einfache Text‑Box (zeigt das rohe HTML, damit Link erhalten bleibt)
+    txt = tk.Text(dlg, wrap="word", width=60, height=10)
+    raw = data["profiles"][active_profile]["texts"][idx]
+    txt.insert("1.0", raw)   # rohes HTML einfügen, damit <a href=...>…</a> stehen bleibt
+ 
+    
+    txt.pack(padx=10, pady=10, fill="both", expand=True)
+    btnf = tk.Frame(dlg)
+    btnf.pack(fill="x", pady=(0,10))
+
+    def add_link():
+        try:
+            start = txt.index("sel.first")
+            end   = txt.index("sel.last")
+            sel   = txt.get(start, end)
+
+        except tk.TclError:
+            return messagebox.showwarning("Keine Auswahl", "Bitte erst Text markieren!")
+        url = simpledialog.askstring("Hyperlink einfügen", "Gib die URL ein:", initialvalue="https://")
+
+        if not url:
+            return
+        txt.delete(start, end)
+        txt.insert(start, f'<a href="{url}">{sel}</a>')
+    link_btn = tk.Button(btnf, text="🔗 Link einfügen", command=add_link)
+    link_btn.pack(side="left", padx=5)
+
+    def on_ok():
+        new_html = txt.get("1.0", "end-1c")
+        entry = text_entries[idx]
+        entry._html = new_html
+        data["profiles"][active_profile]["texts"][idx] = new_html
+        entry.delete(0, tk.END)
+        entry.insert(0, re.sub(r"<a[^>]*>(.*?)</a>", r"\1", new_html))
+        save_button.config(state="normal")
+        dlg.destroy()
+        mark_unsaved_changes()
+    ok_btn = tk.Button(btnf, text="OK", command=on_ok)
+    ok_btn.pack(side="right", padx=5)
+    
+    def on_cancel():
+        save_button.config(state="normal")
+        dlg.destroy()
+
+    dlg.protocol("WM_DELETE_WINDOW", on_cancel)
+
+#endregion
+
 #region data
 
 def load_sde_profile():
@@ -186,8 +299,8 @@ def switch_profile(profile_name):
 
 def add_new_profile():
     global data
-    if len(data["profiles"]) >= 5:
-        messagebox.showerror("Limit erreicht", "Maximal 5 Profile erlaubt!")
+    if len(data["profiles"]) >= 11:
+        messagebox.showerror("Limit erreicht", "Maximal 10 Profile erlaubt!")
         return
     new_name_base = "Profil"
     counter = 1
@@ -248,20 +361,17 @@ if geometry:
 #region insert_text / Register Hotkey
 
 def insert_text(index):
-    try:
-        text = data["profiles"][active_profile]["texts"][index]
-    except IndexError:
-        logging.exception(f"Kein Text vorhanden für Hotkey-Index {index} im Profil '{active_profile}'")
-        return
-
-    if text.startswith("http://") or text.startswith("https://") or "<a " in text.lower():
-        set_clipboard_html(text)
-        time.sleep(0.1)
-        keyboard.send("ctrl+v")
-    else:
-        pyperclip.copy(text)
-        time.sleep(0.1)
-        keyboard.send("ctrl+v")
+    raw = data["profiles"][active_profile]["texts"][index]
+    # 1) kompletten RTF-Body erzeugen (alle Links)
+    body = html_to_rtf_fragment(raw)
+    full_rtf = r"{\rtf1\ansi " + body + "}"
+    # 2) Plain-Text fürs reine Einfügen
+    plain = re.sub(r"<[^>]+>", "", raw)
+    # 3) Clipboard füllen
+    set_clipboard_rtf(full_rtf, plain)
+    # 4) Einfügen
+    time.sleep(0.1)
+    keyboard.send("ctrl+v")
 
 def register_hotkeys():
     if active_profile in data["profiles"]:
@@ -305,16 +415,13 @@ def register_hotkeys():
             if i >= len(data["profiles"][active_profile]["texts"]):
                 logging.warning(f"⚠ Hotkey '{hotkey}' zeigt auf Eintrag {i+1}, aber dieser existiert nicht im Profil '{active_profile}'")
                 continue
-
             def wrapped_handler(index=i, keys=keys):
                 pressed = keyboard._pressed_events
                 if all(keyboard.is_pressed(k) for k in keys):
                     insert_text(index)
             ref = keyboard.add_hotkey(hotkey, wrapped_handler, suppress=True)
-
             registered_hotkey_refs.append(ref)
     return fehlerhafte_hotkeys
-
 
 #endregion
 
@@ -346,10 +453,6 @@ def create_tray_icon():
     tray_thread = threading.Thread(target=tray_icon.run, daemon=True)
     tray_thread.start()
 
-
-
-
-
 def refresh_tray():
     global tray_icon
     if tray_icon is not None:
@@ -380,16 +483,12 @@ def quit_application(icon, item):
     root.destroy()
     sys.exit(0)
 
-
-
 def toggle_hotkeys_from_tray(icon, item):
     global hotkeys_enabled
     hotkeys_enabled = not hotkeys_enabled
-    hotkey_checkbox_var.set(hotkeys_enabled)  # ✔ UI aktualisieren
-    register_hotkeys()                         # ✔ Hotkeys neu laden
+    hotkey_checkbox_var.set(hotkeys_enabled) 
+    register_hotkeys()                        
     refresh_tray()
-
-
 
 #endregion
 
@@ -502,7 +601,6 @@ def swap_entries(i, j):
 #endregion
 
 edit_mode = False
-
 text_entries = []
 title_entries = []
 hotkey_entries = []
@@ -560,13 +658,24 @@ def save_data(stay_in_edit_mode=False):
             active_profile = new_active_profile
         else:
             active_profile = list(available_profiles.keys())[0]
-        if len(updated_profiles) > 5:
-            messagebox.showerror("Limit erreicht", "Maximal 5 Profile erlaubt!")
+        if len(updated_profiles) > 11:
+            messagebox.showerror("Limit erreicht", "Maximal 10 Profile erlaubt!")
             return
         data["active_profile"] = active_profile 
         if active_profile != "SDE":
             data["profiles"][active_profile]["titles"] = [entry.get() for entry in title_entries if entry.winfo_exists()]
-            data["profiles"][active_profile]["texts"] = [entry.get() for entry in text_entries if entry.winfo_exists()]
+           
+            new_texts = []
+            for e in text_entries:
+                html = getattr(e, "_html", None)
+                if html:
+                    new_texts.append(html)
+                else:
+                    new_texts.append(e.get())
+            data["profiles"][active_profile]["texts"] = new_texts
+
+            
+            
             data["profiles"][active_profile]["hotkeys"] = [entry.get() for entry in hotkey_entries if entry.winfo_exists()]
         profiles_to_save = {k: v for k, v in data["profiles"].items() if k != "SDE"}
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -653,33 +762,15 @@ def update_ui():
             btn = tk.Button(frame, text=profile, command=lambda p=profile: switch_profile(p), bg=button_bg, fg=fg_color, activebackground=button_bg, activeforeground=fg_color, font=("Arial", 10, "bold") if profile == active_profile else ("Arial", 10, "normal"))
             btn.pack(side="left", padx=3)
             profile_buttons[profile] = btn
-
-
     help_button = tk.Button(top_frame, text="❓", command=show_help_dialog, bg=button_bg, fg=fg_color)
-    help_button.pack(side="right", padx=5)
-                    
+    help_button.pack(side="right", padx=5)          
     settings_icon = tk.Button(top_frame, text="🔧", command=toggle_edit_mode, width=3, bg=button_bg, fg=fg_color)
     settings_icon.pack(side="right", padx=5, pady=5)
-
-
-
     dark_mode_button = tk.Button(top_frame, text="☾" if not dark_mode else "🔆", command=toggle_dark_mode, bg=button_bg, fg=fg_color)
     dark_mode_button.pack(side="right", padx=5)
-
     hotkey_checkbox_var = tk.BooleanVar(value=hotkeys_enabled)
-    hotkey_checkbox = tk.Checkbutton(
-        top_frame,
-        text="Hotkeys aktiv",
-        variable=hotkey_checkbox_var,
-        command=lambda: toggle_hotkeys_from_ui(hotkey_checkbox_var.get()),
-        bg=bg_color,
-        fg=fg_color,
-        selectcolor=bg_color
-    )
+    hotkey_checkbox = tk.Checkbutton( top_frame, text="Hotkeys aktiv", variable=hotkey_checkbox_var, command=lambda: toggle_hotkeys_from_ui(hotkey_checkbox_var.get()), bg=bg_color, fg=fg_color, selectcolor=bg_color)
     hotkey_checkbox.pack(side="right", padx=5, pady=5)
-
-
-
     if edit_mode:
         add_profile_btn = tk.Button(top_frame, text="➕ Profil", command=lambda: confirm_and_then(add_new_profile), bg=button_bg, fg=fg_color)
         add_profile_btn.pack(side="right", padx=5)
@@ -705,10 +796,6 @@ def update_ui():
     canvas.bind("<Leave>", lambda e: root.unbind_all("<MouseWheel>"))
     root.columnconfigure(0, weight=1)
     root.rowconfigure(1, weight=1)
-
-
-
-
     global title_entries, text_entries, hotkey_entries
     title_entries, text_entries, hotkey_entries = [], [], []
     titles = data["profiles"][active_profile]["titles"]
@@ -748,11 +835,16 @@ def update_ui():
             text_entry.bind("<KeyRelease>", mark_unsaved_changes)
             text_entries.append(text_entry)
         else:
-            text = data["profiles"][active_profile]["texts"][i]
-            lines = [line.strip() for line in text.split("\n") if line.strip()]
+            raw = data["profiles"][active_profile]["texts"][i]
+            # Alle <…>‑Tags wegfiltern für die Anzeige
+            plain = re.sub(r"<[^>]+>", "", raw)
+            lines = [line.strip() for line in plain.split("\n") if line.strip()]
             display_text = "\n".join(lines[:2])
-            text_button = tk.Button(frame, text=display_text, command=lambda i=i: insert_text(i), wraplength=frame.winfo_width() - 150, justify="left", anchor="w", padx=5, pady=5, width=min_text_lenght, height=2, bg=bg_color, fg=fg_color)
+            text_button = tk.Button(frame, text=display_text, command=lambda i=i: insert_text(i), wraplength=frame.winfo_width() - 150, justify="left", anchor="w", padx=5, pady=5, width=min_text_lenght, height=2,bg=bg_color, fg=fg_color)
             text_button.pack(side="left", fill="x", expand=True, padx=5, pady=2)
+        if edit_mode:
+            format_btn = tk.Button(frame, text="✎ Editor", command=lambda i=i: open_format_dialog(i), bg=button_bg, fg=fg_color)
+            format_btn.pack(side="left", padx=2)
         if edit_mode:
             hotkey_entry = tk.Entry(frame, width=12, bg=bg_color, fg=fg_color)
             hotkey_entry.insert(0, data["profiles"][active_profile]["hotkeys"][i])
@@ -768,7 +860,8 @@ def update_ui():
     if edit_mode:
         buttons_frame = tk.Frame(root, bg=bg_color)
         buttons_frame.pack(fill="x", pady=5)
-        save_button = tk.Button(buttons_frame, text="💾 Speichern", command=save_data, fg="white", bg="green", height=2)
+        global save_button
+        save_button = tk.Button(buttons_frame, text="💾 Speichern", command=lambda: save_data(stay_in_edit_mode=False), fg="white", bg="green", height=2)
         save_button.pack(side="left", expand=True, fill="x", padx=5)
         add_button = tk.Button(buttons_frame, text="➕ Neuen Eintrag", command=lambda: confirm_and_then(add_new_entry), bg=button_bg, fg=fg_color, activebackground=button_bg, activeforeground=fg_color, height=2)
         add_button.pack(side="right", expand=True, fill="x", padx=5)
@@ -789,12 +882,10 @@ def toggle_hotkeys_from_ui(value):
 #region help 
 
 def show_help_dialog():
-
     help_text = (
         "QuickPaste Hilfe\n\n"
         "Wichtig: In Outlook kann es vorkommen, dass die Tastenkombination (z. B. Ctrl + Shift + 1) nicht sofort reagiert.\n"
         "Stellen Sie sicher, dass Sie die Zahl direkt nach 'Ctrl + Shift' drücken und versuchen Sie es ein zweites Mal.\n\n"
-
         "• Hotkeys aktiv: Aktiviert/Deaktiviert die Tastenkombinationen.\n"
         "   Wenn deaktiviert, greifen Windows Standardfunktionen.\n\n"
         "• ☾ / 🔆 Dunkelmodus: Wechselt zwischen hell/dunkel.\n\n"
@@ -808,34 +899,9 @@ def show_help_dialog():
         "• 💾 Speichern: Änderungen sichern.\n\n"
         "Bei Fragen oder Problemen: nico.wagner@bit.admin.ch"
     )
-
     tk.messagebox.showinfo("QuickPaste Hilfe", help_text)
 
 #endregion
-
-
-def set_clipboard_html(html_text):
-    # Formatieren nach HTML Clipboard Format (basierend auf MSDN-Spezifikation)
-    html_clipboard = (
-        "Version:0.9\r\n"
-        "StartHTML:00000097\r\n"
-        "EndHTML:{end_html:08d}\r\n"
-        "StartFragment:00000131\r\n"
-        "EndFragment:{end_fragment:08d}\r\n"
-        "<html><body><!--StartFragment-->{html}<!--EndFragment--></body></html>"
-    )
-    html_data = html_clipboard.format(
-        html=html_text,
-        end_html=97 + len(html_text) + 78,
-        end_fragment=131 + len(html_text)
-    )
-    win32clipboard.OpenClipboard()
-    win32clipboard.EmptyClipboard()
-    win32clipboard.SetClipboardData(win32con.CF_TEXT, html_data.encode("utf-8"))
-    win32clipboard.SetClipboardData(win32clipboard.RegisterClipboardFormat("HTML Format"), html_data.encode("utf-8"))
-    win32clipboard.CloseClipboard()
-
-
 
 #region darkmode
 
@@ -846,7 +912,6 @@ def toggle_dark_mode():
     save_window_position()  
 
 #endregion
-
 
 saved_geometry = load_window_position()
 if saved_geometry:
