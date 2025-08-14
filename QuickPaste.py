@@ -1185,7 +1185,7 @@ def show_text_context_menu(pos, text_widget):
     else:
         insert_link_action = menu.addAction("Insert Hyperlink...")
         insert_link_action.triggered.connect(lambda: insert_hyperlink_at_cursor(text_widget))
-    if dark_mode:
+    if app_state.dark_mode:
         menu.setStyleSheet("""
             QMenu {
                 background-color: #2e2e2e;
@@ -1227,7 +1227,7 @@ def add_hyperlink_to_selection(text_widget, cursor):
         link_format = QtGui.QTextCharFormat()
         link_format.setAnchor(True)
         link_format.setAnchorHref(url.strip())
-        link_format.setForeground(QtGui.QColor("#0066cc" if not dark_mode else "#4da6ff"))
+        link_format.setForeground(QtGui.QColor("#0066cc" if not app_state.dark_mode else "#4da6ff"))
         link_format.setUnderlineStyle(QtGui.QTextCharFormat.SingleUnderline)
         cursor.mergeCharFormat(link_format)
         text_widget.setTextCursor(cursor)
@@ -1236,7 +1236,7 @@ def remove_hyperlink_from_selection(text_widget, cursor):
     normal_format = QtGui.QTextCharFormat()
     normal_format.setAnchor(False)
     normal_format.setAnchorHref("")
-    normal_format.setForeground(QtGui.QColor("white" if dark_mode else "black"))
+    normal_format.setForeground(QtGui.QColor("white" if app_state.dark_mode else "black"))
     normal_format.setUnderlineStyle(QtGui.QTextCharFormat.NoUnderline)
     cursor.mergeCharFormat(normal_format)
     text_widget.setTextCursor(cursor)
@@ -1258,12 +1258,12 @@ def insert_hyperlink_at_cursor(text_widget):
             link_format = QtGui.QTextCharFormat()
             link_format.setAnchor(True)
             link_format.setAnchorHref(url.strip())
-            link_format.setForeground(QtGui.QColor("#0066cc" if not dark_mode else "#4da6ff"))
+            link_format.setForeground(QtGui.QColor("#0066cc" if not app_state.dark_mode else "#4da6ff"))
             link_format.setUnderlineStyle(QtGui.QTextCharFormat.SingleUnderline)
             cursor.insertText(display_text.strip(), link_format)
             normal_format = QtGui.QTextCharFormat()
             normal_format.setAnchor(False)
-            normal_format.setForeground(QtGui.QColor("white" if dark_mode else "black"))
+            normal_format.setForeground(QtGui.QColor("white" if app_state.dark_mode else "black"))
             normal_format.setUnderlineStyle(QtGui.QTextCharFormat.NoUnderline)
             cursor.setCharFormat(normal_format)
             text_widget.setTextCursor(cursor)
@@ -1347,7 +1347,7 @@ def update_ui():
     spacer = QtWidgets.QWidget()
     spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     toolbar.addWidget(spacer)
-    if edit_mode:
+    if app_state.edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
         ap.setStyleSheet(
             f"""
@@ -1365,7 +1365,7 @@ def update_ui():
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
     for text, func, tooltip in [
-        ("🌙" if not dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
+        ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
         ("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten")
     ]:
         b = QtWidgets.QPushButton(text)
