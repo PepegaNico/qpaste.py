@@ -802,20 +802,20 @@ def create_tray_icon():
     act_quit = QAction("✖ Beenden", win)
     act_quit.triggered.connect(lambda: (save_window_position(), app.quit()))
     menu.addAction(act_quit)
-    tray.setContextMenu(menu)
-    tray.activated.connect(
+    app_state.tray.setContextMenu(menu)
+    app_state.tray.activated.connect(
         lambda reason:
             (win.show(), win.raise_(), win.activateWindow()) 
             if reason == QSystemTrayIcon.Trigger 
             else None
     )
-    tray.show()
+    app_state.tray.show()
 
 
 def minimize_to_tray():
     win.hide()
-    if tray and hasattr(tray, 'showMessage'):
-        tray.showMessage(
+    if app_state.tray and hasattr(app_state.tray, 'showMessage'):
+        app_state.tray.showMessage(
             "QuickPaste", 
             "Anwendung wurde in die Taskleiste minimiert. Hotkeys bleiben aktiv.",
             QSystemTrayIcon.Information, 
@@ -993,9 +993,9 @@ def on_drag_release(event):
     update_ui()
 
 def swap_entries(i, j):
-    titles = data["profiles"][active_profile]["titles"]
-    texts = data["profiles"][active_profile]["texts"]
-    hotkeys = data["profiles"][active_profile]["hotkeys"]
+    titles = app_state.data["profiles"][app_state.active_profile]["titles"]
+    texts = app_state.data["profiles"][app_state.active_profile]["texts"]
+    hotkeys = app_state.data["profiles"][app_state.active_profile]["hotkeys"]
     titles[i], titles[j] = titles[j], titles[i]
     texts[i], texts[j] = texts[j], texts[i]
 
