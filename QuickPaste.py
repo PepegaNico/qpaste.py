@@ -1,14 +1,11 @@
 import sys, os, json, re, ctypes, logging
 from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtCore import QByteArray, QMimeData
+from PyQt5.QtCore import QByteArray
 import time
 import pyperclip
-import keyboard
 from PyQt5.QtWidgets import QSystemTrayIcon, QAction, QMenu
-
-from pystray import Menu, Icon, MenuItem
-from PIL import Image
-import threading
+import win32clipboard
+import win32con
 
 APPDATA_PATH = os.path.join(os.environ["APPDATA"], "QuickPaste")
 os.makedirs(APPDATA_PATH, exist_ok=True)
@@ -24,8 +21,8 @@ registered_hotkey_refs = []
 unsaved_changes = False
 dragged_index = None
 current_target = None
-profile_buttons = {}     # Profil → QPushButton im Read‑Mode
-profile_lineedits = {}   # Profil → QLineEdit im Edit‑Mode
+profile_buttons = {}
+profile_lineedits = {}
 edit_mode = False
 text_entries = []
 title_entries = []
@@ -36,15 +33,10 @@ registered_hotkey_refs = []
 #region window position 
 
 def save_window_position():
-    """
-    Speichert Geometrie und Dark‑Mode in WINDOW_CONFIG (JSON).
-    """
     try:
-        # Qt speichert Geometrie als QByteArray
         geo_bytes = win.saveGeometry()
         geo_hex   = bytes(geo_bytes.toHex()).decode()
         cfg = {"geometry_hex": geo_hex, "dark_mode": dark_mode}
-        # Atomar schreiben
         tmp = WINDOW_CONFIG + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
@@ -53,18 +45,12 @@ def save_window_position():
         logging.exception(f"⚠ Fehler beim Speichern der Fensterposition: {e}")
 
 def load_window_position():
-    """
-    Liest WINDOW_CONFIG und stellt Geometrie & Dark‑Mode wieder her.
-    Liefert None oder True.
-    """
     global dark_mode
     try:
         with open(WINDOW_CONFIG, "r", encoding="utf-8") as f:
             cfg = json.load(f)
-        # Dark‑Mode wiederherstellen
         if cfg.get("dark_mode") is not None:
             dark_mode = cfg["dark_mode"]
-        # Geometrie wiederherstellen
         hexstr = cfg.get("geometry_hex")
         if hexstr:
             ba = QByteArray.fromHex(hexstr.encode())
@@ -81,25 +67,21 @@ def refresh_tray():
     if tray is not None:
         try:
             tray.hide()
-            tray.deleteLater()  # Properly delete the old tray icon
+            tray.deleteLater()
         except:
             pass
         tray = None
     create_tray_icon()
 
-
 #region data
 
 def load_sde_profile():
-    """Lädt sde.json oder liefert Standard‑SDE zurück."""
     try:
         with open(SDE_FILE, "r", encoding="utf-8") as f:
             sde = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         logging.warning("⚠ Konnte sde.json nicht laden. Setze Standard‑SDE.")
         sde = {}
-
-    # Wenn nichts drinsteht, fülle mit Defaults
     if not sde.get("titles") and not sde.get("texts") and not sde.get("hotkeys"):
         sde = {
             "titles": ["Standard Titel 1", "Standard Titel 2", "Standard Titel 3"],
@@ -109,21 +91,16 @@ def load_sde_profile():
     return sde
 
 def load_data():
-    """Lädt config.json, stellt Struktur sicher und hängt SDE an."""
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
-        # Sicherstellen, dass profiles ein Dict ist
         if not isinstance(loaded.get("profiles"), dict):
             loaded["profiles"] = {}
-        # Für jedes Profil die drei Listen garantieren
         for prof, vals in loaded["profiles"].items():
             vals.setdefault("titles", [])
             vals.setdefault("texts",  [])
             vals.setdefault("hotkeys", [])
-        # SDE‑Profil anhängen (überschreibt vorhandenes SDE)
         loaded["profiles"]["SDE"] = load_sde_profile()
-        # aktives Profil prüfen
         ap = loaded.get("active_profile")
         if ap not in loaded["profiles"]:
             if loaded["profiles"]:
@@ -135,9 +112,7 @@ def load_data():
                 }
                 loaded["active_profile"] = "Profil 1"
         return loaded
-
     except (FileNotFoundError, json.JSONDecodeError):
-        # Fallback‑Defaults, falls Datei fehlt oder ungültig ist
         return {
             "profiles": {
                 "Profil 1": {
@@ -162,23 +137,18 @@ active_profile = data.get("active_profile")
 #region profiles
 
 def has_field_changes(profile_to_check=None):
-    """Gibt True, wenn sich die sichtbaren Edit‑Felder von den Daten unterscheiden."""
     if profile_to_check is None:
         profile_to_check = active_profile
     prof = data["profiles"][profile_to_check]
     titles, texts, hks = [], [], []
-    # Sammle Edit‑Zeilen aus entries_layout
     for i in range(entries_layout.count()):
         item = entries_layout.itemAt(i)
         if item is None:
             continue
         row = item.widget()
         if edit_mode and isinstance(row, QtWidgets.QWidget):
-            # Find QLineEdit widgets for titles and hotkeys
             line_edits = row.findChildren(QtWidgets.QLineEdit)
-            # Find QTextEdit widgets for texts
             text_edits = row.findChildren(QtWidgets.QTextEdit)
-            
             if len(line_edits) >= 2 and len(text_edits) >= 1:
                 titles.append(line_edits[0].text())
                 texts.append(text_edits[0].toHtml())
@@ -188,7 +158,6 @@ def has_field_changes(profile_to_check=None):
          or hks    != prof["hotkeys"])
 
 def save_profile_names():
-    """Liest alle QLineEdit in profile_lineedits, benennt data['profiles'] um."""
     global data, active_profile
     if not edit_mode:
         return
@@ -208,7 +177,6 @@ def save_profile_names():
     update_ui()
 
 def update_profile_buttons():
-    """Hebt in profile_buttons den aktiven Profil‑Button hervor."""
     for prof, btn in profile_buttons.items():
         if prof == active_profile:
             btn.setStyleSheet("background: lightblue; font-weight: bold;")
@@ -216,45 +184,30 @@ def update_profile_buttons():
             btn.setStyleSheet("")
 
 def switch_profile(profile_name):
-    """Wechselt das Profil, fragt bei ungespeicherten Änderungen."""
     global active_profile
-    
-    # Don't check for changes if we're switching to the same profile
     if profile_name == active_profile:
         return
-    
-    # If we're in edit mode, check for changes in the current profile BEFORE switching
     if edit_mode and title_entries and text_entries and hotkey_entries:
-        # Use the existing entry arrays that are maintained by update_ui()
         current_titles = [entry.text() for entry in title_entries]
-        
-        # For text comparison, use plain text to avoid HTML formatting differences
         current_texts = []
         for entry in text_entries:
             if hasattr(entry, 'toPlainText'):
                 current_texts.append(entry.toPlainText())
             else:
                 current_texts.append(entry.text())
-        
         current_hks = [entry.text() for entry in hotkey_entries]
-        
-        # Compare with stored data for current profile
         stored_data = data["profiles"][active_profile]
-        
-        # Convert stored HTML texts to plain text for comparison
         stored_plain_texts = []
         for stored_text in stored_data["texts"]:
-            if '<' in stored_text and '>' in stored_text:  # HTML content
+            if '<' in stored_text and '>' in stored_text:
                 doc = QtGui.QTextDocument()
                 doc.setHtml(stored_text)
                 stored_plain_texts.append(doc.toPlainText())
             else:
                 stored_plain_texts.append(stored_text)
-        
         has_changes = (current_titles != stored_data["titles"] or 
                       current_texts != stored_plain_texts or 
                       current_hks != stored_data["hotkeys"])
-        
         if has_changes:
             resp = show_question_message(
                 "Ungesicherte Änderungen",
@@ -264,46 +217,33 @@ def switch_profile(profile_name):
             if resp == QtWidgets.QMessageBox.Cancel:
                 return
             if resp == QtWidgets.QMessageBox.Yes:
-                # Save current changes to current profile before switching
                 data["profiles"][active_profile]["titles"] = current_titles
                 data["profiles"][active_profile]["texts"] = [entry.toHtml() if hasattr(entry, 'toHtml') else entry.text() for entry in text_entries]
                 data["profiles"][active_profile]["hotkeys"] = current_hks
-                # Save to file
                 profiles_to_save = {k: v for k, v in data["profiles"].items() if k != "SDE"}
                 with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                     json.dump({"profiles": profiles_to_save, "active_profile": profile_name}, f, indent=4)
             elif resp == QtWidgets.QMessageBox.No:
-                # User clicked "No" - reload original data from file to discard changes
-                # This ensures we revert to the saved state before switching profiles
                 try:
                     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                         file_data = json.load(f)
                     if active_profile in file_data.get("profiles", {}):
-                        # Restore the original data for current profile
                         data["profiles"][active_profile] = file_data["profiles"][active_profile].copy()
                 except (FileNotFoundError, json.JSONDecodeError, KeyError):
-                    # If file read fails, keep current data as fallback
                     pass
     
     if profile_name not in data["profiles"]:
         show_critical_message("Fehler", f"Profil '{profile_name}' existiert nicht!")
         return
-    
-    # Switch to the new profile
     active_profile = profile_name
     data["active_profile"] = profile_name
-    
-    # Save the active profile change to file
     profiles_to_save = {k: v for k, v in data["profiles"].items() if k != "SDE"}
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump({"profiles": profiles_to_save, "active_profile": profile_name}, f, indent=4)
-    
-    # Refresh the UI to show the correct profile's data
     update_profile_buttons()
     update_ui()
 
 def add_new_profile():
-    """Legt ein neues Profil mit drei Default‑Einträgen an."""
     global active_profile
     if len(data["profiles"]) >= 11:
         show_critical_message("Limit erreicht", "Maximal 10 Profile erlaubt!")
@@ -322,7 +262,6 @@ def add_new_profile():
     update_ui()
 
 def delete_profile(profile_name):
-    """Löscht ein Profil mit Bestätigung (SDE ausgeschlossen)."""
     global active_profile
     if profile_name == "SDE":
         show_critical_message("Fehler", "Das SDE‑Profil kann nicht gelöscht werden.")
@@ -344,43 +283,178 @@ def delete_profile(profile_name):
     save_data()
 
 def make_profile_switcher(profile_name):
-    """Für Tray‑Menu: Callback‑Wrapper für switch_profile."""
     return lambda icon, item: switch_profile(profile_name)
 
 #endregion 
 
 #region insert text / hotkeys
 
-def insert_text(index):
+def set_clipboard_html(html_content, plain_text_content):
+    max_retries = 3
+    retry_delay = 0.02
+    for attempt in range(max_retries):
+        try:
+            clipboard_opened = False
+            for open_attempt in range(5):
+                try:
+                    win32clipboard.OpenClipboard()
+                    clipboard_opened = True
+                    break
+                except:
+                    time.sleep(0.01)
+            if not clipboard_opened:
+                logging.warning(f"Failed to open clipboard after 5 attempts")
+                return False
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardText(plain_text_content, win32con.CF_TEXT)
+            html_header = """Version:0.9
+StartHTML:0000000105
+EndHTML:{:010d}
+StartFragment:0000000141
+EndFragment:{:010d}
+<html>
+<body>
+<!--StartFragment-->{}<!--EndFragment-->
+</body>
+</html>""".format(len(html_content) + 175, len(html_content) + 141, html_content)
+            cf_html = win32clipboard.RegisterClipboardFormat("HTML Format")
+            win32clipboard.SetClipboardData(cf_html, html_header.encode('utf-8'))
+            win32clipboard.CloseClipboard()
+            time.sleep(0.01)
+            try:
+                win32clipboard.OpenClipboard()
+                html_available = win32clipboard.IsClipboardFormatAvailable(cf_html)
+                text_available = win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT)
+                win32clipboard.CloseClipboard()
+                if html_available and text_available:
+                    logging.info(f"Successfully set clipboard with HTML content (attempt {attempt + 1}): {html_content[:50]}...")
+                    return True
+                else:
+                    logging.warning(f"Clipboard verification failed (attempt {attempt + 1}): HTML={html_available}, Text={text_available}")
+            except Exception as verify_error:
+                logging.warning(f"Clipboard verification failed (attempt {attempt + 1}): {verify_error}")
+        except Exception as e:
+            logging.warning(f"Error setting clipboard (attempt {attempt + 1}): {e}")
+            try:
+                win32clipboard.CloseClipboard()
+            except:
+                pass
+        if attempt < max_retries - 1:
+            time.sleep(retry_delay)
+    logging.error(f"Failed to set clipboard after {max_retries} attempts")
+    return False
+
+def html_to_rtf(html_content, plain_text):
+    try:
+        rtf = "{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Times New Roman;}} "
+        import re
+        link_pattern = r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>([^<]+)</a>'
+        def replace_link(match):
+            url = match.group(1)
+            text = match.group(2)
+            return f"{{\\field{{\\*\\fldinst{{HYPERLINK \"{url}\"}}}}{{\\fldrslt{{\\ul\\cf1 {text}}}}}}}"
+        converted_text = re.sub(link_pattern, replace_link, html_content, flags=re.IGNORECASE)
+        converted_text = re.sub(r'<[^>]+>', '', converted_text)
+        rtf += converted_text + "}"
+        return rtf
+    except Exception as e:
+        logging.warning(f"RTF conversion failed: {e}")
+        return f"{{\\rtf1\\ansi\\deff0 {{\\fonttbl {{\\f0 Times New Roman;}}}} {plain_text}}}"
+
+def release_all_modifier_keys():
     """
-    Kopiert den gespeicherten Text in die Zwischenablage
-    und führt Strg+V aus.
+    Lässt sicherheitshalber alle Modifiertasten los (Ctrl/Shift/Alt/Win),
+    ohne die 'keyboard'-Bibliothek zu verwenden.
     """
     try:
+        user32 = ctypes.windll.user32
+        KEYEVENTF_KEYUP = 0x0002
+
+        # VK-Codes: Ctrl, Shift, Alt, LWin, RWin
+        modifiers = (0x11, 0x10, 0x12, 0x5B, 0x5C)
+
+        # Mehrfach versuchen, falls ein Event „hängen“ bleibt
+        for _ in range(3):
+            for vk in modifiers:
+                try:
+                    user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+                except Exception:
+                    pass
+            time.sleep(0.01)
+
+        time.sleep(0.05)  # kleine Zusatz-Pause für Stabilität
+    except Exception as e:
+        logging.warning(f"Error releasing modifier keys (WinAPI): {e}")
+
+def insert_text(index):
+    # kleine lokale Helper, damit kein weiterer Code nötig ist
+    def _send_ctrl_v():
+        user32 = ctypes.windll.user32
+        # 0x11 = VK_CONTROL, 0x56 = VK_V
+        user32.keybd_event(0x11, 0, 0, 0)   # Ctrl down
+        user32.keybd_event(0x56, 0, 0, 0)   # V down
+        user32.keybd_event(0x56, 0, 2, 0)   # V up
+        user32.keybd_event(0x11, 0, 2, 0)   # Ctrl up
+
+    try:
         txt = data["profiles"][active_profile]["texts"][index]
+        logging.info(f"Inserting text for index {index}: {txt[:50]}...")
     except IndexError:
         logging.exception(
             f"Kein Text vorhanden für Hotkey-Index {index} im Profil '{active_profile}'"
         )
         return
-    # For rich text, copy as HTML to preserve formatting and hyperlinks
-    if '<' in txt and '>' in txt:  # Simple check for HTML content
-        # Use QClipboard to set both HTML and plain text
-        clipboard = QtWidgets.QApplication.clipboard()
-        mime_data = QtCore.QMimeData()
-        mime_data.setHtml(txt)
-        mime_data.setText(txt)  # Fallback plain text
-        clipboard.setMimeData(mime_data)
-    else:
-        pyperclip.copy(txt)
-    time.sleep(0.1)
-    keyboard.send("ctrl+v")
+
+    try:
+        # 1) Sicherstellen, dass keine Modifier „hängen“
+        release_all_modifier_keys()
+
+        # 2) HTML + Plaintext in die Zwischenablage legen
+        doc = QtGui.QTextDocument()
+        doc.setHtml(txt)
+        plain_text = doc.toPlainText()
+        success = set_clipboard_html(txt, plain_text)
+        if not success:
+            logging.warning("Windows clipboard failed, falling back to pyperclip")
+            pyperclip.copy(plain_text)
+            logging.info(f"Fallback: Set plain text to clipboard: {plain_text[:30]}...")
+
+        # 3) kurze Stabilisierungspause
+        time.sleep(0.2)
+
+        # 4) nochmals alle Modifier loslassen (defensiv)
+        release_all_modifier_keys()
+
+        # 5) Einfügen via WinAPI (robust, kein 'keyboard' nötig)
+        _send_ctrl_v()
+        time.sleep(0.05)
+
+        # 6) final: Modifier sicher loslassen
+        release_all_modifier_keys()
+
+        logging.info(f"Successfully inserted text for index {index}")
+
+    except Exception as e:
+        logging.exception(f"Error in insert_text for index {index}: {e}")
+        try:
+            # Minimal-Fallback: Nur Plaintext setzen und erneut pasten
+            doc = QtGui.QTextDocument()
+            doc.setHtml(txt)
+            plain_text = doc.toPlainText()
+            pyperclip.copy(plain_text)
+            logging.info(f"Final fallback: Set plain text to clipboard: {plain_text[:30]}...")
+
+            release_all_modifier_keys()
+            _send_ctrl_v()
+            time.sleep(0.05)
+            release_all_modifier_keys()
+
+            logging.info(f"Successfully inserted text (final fallback) for index {index}")
+        except Exception as fallback_error:
+            logging.exception(f"All clipboard methods failed for index {index}: {fallback_error}")
+
 
 def copy_text_to_clipboard(index):
-    """
-    Kopiert den gespeicherten Text nur in die Zwischenablage ohne Strg+V.
-    Wird für Button-Klicks verwendet.
-    """
     try:
         txt = data["profiles"][active_profile]["texts"][index]
     except IndexError:
@@ -388,59 +462,90 @@ def copy_text_to_clipboard(index):
             f"Kein Text vorhanden für Index {index} im Profil '{active_profile}'"
         )
         return
-    
-    # For rich text, copy as HTML to preserve formatting and hyperlinks
-    if '<' in txt and '>' in txt:  # Simple check for HTML content
-        # Use QClipboard to set both HTML and plain text
-        clipboard = QtWidgets.QApplication.clipboard()
-        mime_data = QtCore.QMimeData()
-        mime_data.setHtml(txt)
-        mime_data.setText(txt)  # Fallback plain text
-        clipboard.setMimeData(mime_data)
-    else:
-        pyperclip.copy(txt)
-    
-    # Optional: Show a brief visual feedback
+    try:
+        doc = QtGui.QTextDocument()
+        doc.setHtml(txt)
+        plain_text = doc.toPlainText()
+        success = set_clipboard_html(txt, plain_text)
+        if not success:
+            logging.warning("Windows clipboard failed, falling back to pyperclip")
+            pyperclip.copy(plain_text)
+            logging.info(f"Fallback: Copied plain text to clipboard: {plain_text[:30]}...")
+    except Exception as e:
+        logging.exception(f"Error copying text for index {index}: {e}")
+        try:
+            doc = QtGui.QTextDocument()
+            doc.setHtml(txt)
+            plain_text = doc.toPlainText()
+            pyperclip.copy(plain_text)
+            logging.info(f"Final fallback: Copied plain text to clipboard: {plain_text[:30]}...")
+        except Exception as fallback_error:
+            logging.exception(f"All clipboard copy methods failed for index {index}: {fallback_error}")
     if hasattr(win, 'statusBar'):
         win.statusBar().showMessage("Text in Zwischenablage kopiert!", 2000)
 
 def register_hotkeys():
     """
-    Entfernt alte Hotkeys und registriert neue für
-    data['profiles'][active_profile]['hotkeys'].
-    Nutzt QMessageBox für Fehleranzeigen.
+    Registriert globale Hotkeys via WinAPI (RegisterHotKey) und verarbeitet sie
+    über ein Qt-NativeEventFilter – ganz ohne 'keyboard'-Bibliothek.
+    Erwartetes Format der Hotkeys (wie bisher im UI): 'ctrl+shift+[zeichen]'
     """
-    global registered_hotkey_refs
+    import ctypes
+    from ctypes import wintypes
 
-    # alte Hotkeys löschen
-    for ref in registered_hotkey_refs:
+    # --- Win32 Konstanten & Helper ---
+    user32 = ctypes.windll.user32
+    WM_HOTKEY = 0x0312
+    MOD_ALT     = 0x0001
+    MOD_CONTROL = 0x0002
+    MOD_SHIFT   = 0x0004
+    MOD_WIN     = 0x0008
+
+    # VK aus Zeichen (Ziffern + Buchstaben)
+    def _vk_from_char(ch: str):
+        ch = ch.strip()
+        if not ch:
+            return None
+        # Ziffernreihe 0..9
+        if "0" <= ch <= "9":
+            return ord(ch)
+        # Buchstaben
+        if "a" <= ch <= "z":
+            return ord(ch.upper())
+        # alles andere (Sonderzeichen wie §,'^) hier nicht unterstützen
+        return None
+
+    # --- Bestehende Registrierungen aufräumen (falls schon welche da sind) ---
+    # Wir benutzen eigene Strukturen statt 'registered_hotkey_refs' (keyboard)
+    global registered_hotkey_ids, id_to_index, hotkey_filter_instance
+    if "registered_hotkey_ids" not in globals():
+        registered_hotkey_ids = []
+    if "id_to_index" not in globals():
+        id_to_index = {}
+
+    # Deregistrieren
+    for _id in registered_hotkey_ids:
         try:
-            keyboard.remove_hotkey(ref)
+            user32.UnregisterHotKey(None, _id)
         except Exception:
             pass
-    registered_hotkey_refs.clear()
+    registered_hotkey_ids = []
+    id_to_index = {}
 
-    erlaubte_zeichen = set("1234567890befhmpqvxz§'^")
+    # --- Hotkeys aus aktivem Profil einlesen & validieren ---
+    erlaubte_zeichen = set("1234567890befhmpqvxz")  # wie bisher, aber ohne Sonderzeichen
     belegte = set()
     fehler = False
-
     hotkeys = data["profiles"].setdefault(active_profile, {}).setdefault("hotkeys", [])
 
-    def hotkey_handler(idx):
-        # Falls Pfeiltasten gedrückt, nicht einfügen
-        pressed = keyboard._pressed_events.keys()
-        if any(k in {72,80,75,77} for k in pressed):
-            logging.warning("⚠ Windows-Funktion erkannt, kein Text eingefügt.")
-            return
-        insert_text(idx)
-        keyboard.release("ctrl")
-        keyboard.release("shift")
-
+    next_id = 1
     for i, hot in enumerate(hotkeys):
-        hot = hot.strip().lower()
+        hot = (hot or "").strip().lower()
         if not hot:
             continue
+
         parts = hot.split("+")
+        # Wichtig: wir bleiben vorerst bei deinem bisherigen Schema 'ctrl+shift+X'
         if (
             len(parts) != 3
             or parts[0] != "ctrl"
@@ -450,30 +555,77 @@ def register_hotkeys():
             show_critical_message(
                 "Fehler",
                 f"Ungültiger Hotkey \"{hotkeys[i]}\" für Eintrag {i+1}.\n"
-                f"Erlaubte Zeichen: {''.join(sorted(erlaubte_zeichen))}"
+                f"Erlaubte Zeichen: {''.join(sorted(erlaubte_zeichen))}\n"
+                f"Format: ctrl+shift+[zeichen]"
             )
             fehler = True
             continue
+
         if hot in belegte:
             show_critical_message("Fehler", f"Hotkey \"{hotkeys[i]}\" wird bereits verwendet!")
             fehler = True
             continue
         belegte.add(hot)
+
         if i >= len(data["profiles"][active_profile]["texts"]):
-            logging.warning(
-                f"⚠ Hotkey '{hot}' zeigt auf Eintrag {i+1}, aber dieser existiert nicht."
-            )
+            logging.warning(f"⚠ Hotkey '{hot}' zeigt auf Eintrag {i+1}, aber dieser existiert nicht.")
             continue
 
-        # registrieren
-        try:
-            ref = keyboard.add_hotkey(hot, lambda idx=i: hotkey_handler(idx), suppress=True)
-            registered_hotkey_refs.append(ref)
-        except Exception as e:
-            logging.exception(f"Fehler beim Registrieren des Hotkeys '{hot}': {e}")
+        ch = parts[2]
+        vk = _vk_from_char(ch)
+        if vk is None:
+            show_critical_message("Fehler", f"Hotkey-Zeichen '{ch}' wird nicht unterstützt.")
             fehler = True
+            continue
+
+        mods = MOD_CONTROL | MOD_SHIFT
+        if not user32.RegisterHotKey(None, next_id, mods, vk):
+            logging.error(f"RegisterHotKey fehlgeschlagen für {hot} (id={next_id})")
+            fehler = True
+            continue
+
+        id_to_index[next_id] = i
+        registered_hotkey_ids.append(next_id)
+        next_id += 1
+
+    logging.info(f"Registered {len(registered_hotkey_ids)} hotkeys for profile '{active_profile}'")
+
+    # --- NativeEventFilter einmalig installieren, um WM_HOTKEY zu empfangen ---
+    # Wir definieren den Filter lokal und installieren ihn nur einmal.
+    if "hotkey_filter_instance" not in globals() or hotkey_filter_instance is None:
+        class _MSG(ctypes.Structure):
+            _fields_ = [
+                ("hwnd",    wintypes.HWND),
+                ("message", wintypes.UINT),
+                ("wParam",  wintypes.WPARAM),
+                ("lParam",  wintypes.LPARAM),
+                ("time",    wintypes.DWORD),
+                ("pt",      wintypes.POINT),
+            ]
+
+        class _HotkeyFilter(QtCore.QAbstractNativeEventFilter):
+            def nativeEventFilter(self, eventType, message):
+                # Nur Windows generische Messages interessieren uns
+                if eventType == "windows_generic_MSG":
+                    # PyQt5 gibt 'message' als sip.voidptr; erst in int-Adresse wandeln:
+                    addr = int(message)                 # <- wichtig
+                    msg  = _MSG.from_address(addr)      # aus der Adresse eine MSG-Struct machen
+                    if msg.message == WM_HOTKEY:
+                        try:
+                            hotkey_id = int(msg.wParam)
+                            idx = id_to_index.get(hotkey_id)
+                            if idx is not None:
+                                # Wir sind im Qt-Mainthread – direkt einfügen
+                                insert_text(idx)
+                        except Exception as e:
+                            logging.exception(f"Fehler im WM_HOTKEY-Handler: {e}")
+                return False, 0
+
+        hotkey_filter_instance = _HotkeyFilter()
+        app.installNativeEventFilter(hotkey_filter_instance)
 
     return fehler
+
 
 #endregion
 
@@ -481,7 +633,6 @@ def register_hotkeys():
 
 def create_tray_icon():
     global tray
-    # Clean up any existing tray icon first
     if tray:
         try:
             tray.hide()
@@ -489,29 +640,20 @@ def create_tray_icon():
         except:
             pass
         tray = None
-
     tray = QSystemTrayIcon(QtGui.QIcon(ICON_PATH), win)
     menu = QMenu()
-
-    # Profil‑Einträge im Menü
     for prof in data["profiles"]:
         label = f"✓ {prof}" if prof == active_profile else f"  {prof}"
         act = QAction(label, win)
         act.triggered.connect(lambda _, p=prof: switch_profile(p))
         menu.addAction(act)
-
     menu.addSeparator()
-
-    # Öffnen
     act_show = QAction("↑ Öffnen", win)
     act_show.triggered.connect(lambda: (win.show(), win.raise_(), win.activateWindow()))
     menu.addAction(act_show)
-
-    # Beenden
     act_quit = QAction("✖ Beenden", win)
     act_quit.triggered.connect(lambda: (save_window_position(), app.quit()))
     menu.addAction(act_quit)
-
     tray.setContextMenu(menu)
     tray.activated.connect(
         lambda reason:
@@ -523,9 +665,7 @@ def create_tray_icon():
 
 
 def minimize_to_tray():
-    """Hide the window to system tray"""
     win.hide()
-    # Only show notification if tray exists and has the showMessage method
     if tray and hasattr(tray, 'showMessage'):
         tray.showMessage(
             "QuickPaste", 
@@ -539,14 +679,10 @@ def minimize_to_tray():
 #region add/del/move/drag Entry
 
 def start_drag(event, index, widget):
-    """Start drag operation"""
     global dragged_index, dark_mode
     dragged_index = index
-    
-    # Get the parent row widget to highlight it during drag
     row_widget = widget.parent()
     if hasattr(row_widget, 'highlight_drop_zone'):
-        # Store original style and dim the dragged item
         original_style = row_widget.styleSheet()
         row_widget.setStyleSheet(f"""
             QWidget {{
@@ -556,26 +692,17 @@ def start_drag(event, index, widget):
                 border-radius: 6px;
             }}
         """)
-    
-    # Create drag object
     drag = QtGui.QDrag(widget)
     mime_data = QtCore.QMimeData()
     mime_data.setText(str(index))
     drag.setMimeData(mime_data)
-    
-    # Execute drag
     result = drag.exec_(QtCore.Qt.MoveAction)
-    
-    # Restore original appearance after drag is complete
     if hasattr(row_widget, 'highlight_drop_zone'):
         row_widget.setStyleSheet("")
-        # Clear any remaining highlights on all widgets
         clear_all_highlights()
 
 def clear_all_highlights():
-    """Clear highlight styling from all drag-drop widgets"""
     try:
-        # Find all DragDropWidget instances and clear their highlights
         for i in range(entries_layout.count()):
             item = entries_layout.itemAt(i)
             if item and item.widget():
@@ -583,11 +710,8 @@ def clear_all_highlights():
                 if isinstance(widget, DragDropWidget) and hasattr(widget, 'highlight_drop_zone'):
                     widget.highlight_drop_zone(False)
     except:
-        # Ignore errors if layout is being modified
         pass
-
 class DragDropWidget(QtWidgets.QWidget):
-    """Custom widget that handles drag and drop"""
     def __init__(self, index, parent=None):
         super().__init__(parent)
         self.drag_index = index
@@ -597,34 +721,26 @@ class DragDropWidget(QtWidgets.QWidget):
     
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
-            # Highlight this widget as a drop target
             self.highlight_drop_zone(True)
             event.acceptProposedAction()
     
     def dragLeaveEvent(self, event):
-        # Remove highlight when drag leaves this widget
         self.highlight_drop_zone(False)
         super().dragLeaveEvent(event)
     
     def dropEvent(self, event):
         global dragged_index
-        # Remove highlight after drop
         self.highlight_drop_zone(False)
-        
         if event.mimeData().hasText():
             source_index = int(event.mimeData().text())
             target_index = self.drag_index
-            
             if source_index != target_index:
                 move_entry_to(source_index, target_index)
-            
             event.acceptProposedAction()
     
     def highlight_drop_zone(self, highlight):
-        """Add or remove visual highlighting for drop zones"""
         global dark_mode
         if highlight and not self.is_highlighted:
-            # Store original style and apply highlight
             self.original_style = self.styleSheet()
             highlight_color = "#4a90e2" if dark_mode else "#87ceeb"
             border_color = "#5aa3f0" if dark_mode else "#4682b4"
@@ -637,15 +753,10 @@ class DragDropWidget(QtWidgets.QWidget):
             """)
             self.is_highlighted = True
         elif not highlight and self.is_highlighted:
-            # Restore original style
             self.setStyleSheet(self.original_style)
             self.is_highlighted = False
 
 def move_entry(index, direction):
-    """
-    Verschiebt den Eintrag (Titel und Text) nach oben oder unten.
-    Die Hotkey-Reihenfolge bleibt unverändert.
-    """
     titles = data["profiles"][active_profile]["titles"]
     texts = data["profiles"][active_profile]["texts"]
     if direction == "up" and index > 0:
@@ -768,7 +879,6 @@ def toggle_edit_mode():
     if active_profile == "SDE" and not is_sde_only:
         show_information_message("Nicht editierbar", "Das SDE-Profil kann nicht bearbeitet werden.")
         return
-
     edit_mode = True
     update_ui()
 #endregion
@@ -778,7 +888,6 @@ def toggle_edit_mode():
 def save_data(stay_in_edit_mode=False):
     global data, tray, active_profile, profile_entries
     try:
-        # Only rename profiles if profile_entries is filled (edit mode)
         if edit_mode and profile_entries:
             updated_profiles = {}
             new_active_profile = active_profile
@@ -806,7 +915,6 @@ def save_data(stay_in_edit_mode=False):
                 show_critical_message("Limit erreicht", "Maximal 10 Profile erlaubt!")
                 return
             data["active_profile"] = active_profile
-        # Always update current profile's entries
         if active_profile != "SDE":
             data["profiles"][active_profile]["titles"] = [entry.text() for entry in title_entries]
             data["profiles"][active_profile]["texts"] = [entry.toHtml() if hasattr(entry, 'toHtml') else entry.text() for entry in text_entries]
@@ -849,7 +957,6 @@ def confirm_and_then(action_if_yes):
     else:
         reset_unsaved_changes()
     QtCore.QTimer.singleShot(100, action_if_yes)
-
 data = load_data()
 active_profile = data.get("active_profile", list(data["profiles"].keys())[0])
 
@@ -860,75 +967,183 @@ active_profile = data.get("active_profile", list(data["profiles"].keys())[0])
 app = QtWidgets.QApplication(sys.argv)
 if sys.platform.startswith("win"):
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuickPaste")
-
-# Erstelle Hauptfenster
 win = QtWidgets.QMainWindow()
 win.setWindowTitle("QuickPaste")
 win.setMinimumSize(399, 100)
-win.setWindowIcon(QtGui.QIcon(os.path.join(os.path.dirname(__file__), "assets", "H.ico")))
-QtCore.QTimer.singleShot(500, lambda: win.setWindowIcon(QtGui.QIcon(os.path.join(os.path.dirname(__file__), "assets", "H.ico"))))
-
-# Add status bar for user feedback
+win.setWindowIcon(QtGui.QIcon(ICON_PATH) if os.path.exists(ICON_PATH) else win.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon))
+QtCore.QTimer.singleShot(500, lambda: win.setWindowIcon(QtGui.QIcon(ICON_PATH) if os.path.exists(ICON_PATH) else win.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon)))
 win.statusBar().showMessage("Bereit")
 
-# Close‑Event für Save und Tray
 def close_event_handler(event):
-    """Handle window close event - minimize to tray instead of closing"""
     if not win.isVisible():
-        # Window is already hidden, don't process again
         event.ignore()
         return
     save_window_position()
     minimize_to_tray()
-    event.ignore()  # Prevent the window from actually closing
-
+    event.ignore()
 win.closeEvent = close_event_handler
-
 central = QtWidgets.QWidget()
 main_layout = QtWidgets.QVBoxLayout(central)
 main_layout.setContentsMargins(0,0,0,0)
 main_layout.setSpacing(0)
 win.setCentralWidget(central)
-
 toolbar = QtWidgets.QToolBar()
 toolbar.setMovable(False)
 win.addToolBar(toolbar)
-
 scroll_area = QtWidgets.QScrollArea()
 scroll_area.setWidgetResizable(True)
 main_layout.addWidget(scroll_area)
-
 container = QtWidgets.QWidget()
 entries_layout = QtWidgets.QVBoxLayout(container)
 entries_layout.setAlignment(QtCore.Qt.AlignTop)
-entries_layout.setSpacing(6)  # Add space between entries
-entries_layout.setContentsMargins(8, 8, 8, 8)  # Add margins around the container
+entries_layout.setSpacing(6)
+entries_layout.setContentsMargins(8, 8, 8, 8)
 scroll_area.setWidget(container)
-
 
 #endregion
 
 #region UI
 
+def show_text_context_menu(pos, text_widget):
+    menu = QtWidgets.QMenu(text_widget)
+    cursor = text_widget.textCursor()
+    has_selection = cursor.hasSelection()
+    selected_text = cursor.selectedText() if has_selection else ""
+    undo_action = menu.addAction("Undo")
+    undo_action.setShortcut("Ctrl+Z")
+    undo_action.triggered.connect(text_widget.undo)
+    undo_action.setEnabled(text_widget.document().isUndoAvailable())
+    redo_action = menu.addAction("Redo")
+    redo_action.setShortcut("Ctrl+Y")
+    redo_action.triggered.connect(text_widget.redo)
+    redo_action.setEnabled(text_widget.document().isRedoAvailable())
+    menu.addSeparator()
+    cut_action = menu.addAction("Cut")
+    cut_action.setShortcut("Ctrl+X")
+    cut_action.triggered.connect(text_widget.cut)
+    cut_action.setEnabled(has_selection)
+    copy_action = menu.addAction("Copy")
+    copy_action.setShortcut("Ctrl+C")
+    copy_action.triggered.connect(text_widget.copy)
+    copy_action.setEnabled(has_selection)
+    paste_action = menu.addAction("Paste")
+    paste_action.setShortcut("Ctrl+V")
+    paste_action.triggered.connect(text_widget.paste)
+    paste_action.setEnabled(bool(QtWidgets.QApplication.clipboard().text().strip()))
+    delete_action = menu.addAction("Delete")
+    delete_action.triggered.connect(lambda: cursor.removeSelectedText() if has_selection else None)
+    delete_action.setEnabled(has_selection)
+    menu.addSeparator()
+    select_all_action = menu.addAction("Select All")
+    select_all_action.setShortcut("Ctrl+A")
+    select_all_action.triggered.connect(text_widget.selectAll)
+    menu.addSeparator()
+    if has_selection:
+        add_link_action = menu.addAction("Add Hyperlink...")
+        add_link_action.triggered.connect(lambda: add_hyperlink_to_selection(text_widget, cursor))
+        if cursor.charFormat().isAnchor():
+            remove_link_action = menu.addAction("Remove Hyperlink")
+            remove_link_action.triggered.connect(lambda: remove_hyperlink_from_selection(text_widget, cursor))
+    else:
+        insert_link_action = menu.addAction("Insert Hyperlink...")
+        insert_link_action.triggered.connect(lambda: insert_hyperlink_at_cursor(text_widget))
+    if dark_mode:
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2e2e2e;
+                color: white;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QMenu::item {
+                background-color: transparent;
+                padding: 6px 20px;
+                border-radius: 3px;
+            }
+            QMenu::item:selected {
+                background-color: #4a90e2;
+                color: white;
+            }
+            QMenu::item:disabled {
+                color: #888;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #555;
+                margin: 2px 10px;
+            }
+        """)
+    global_pos = text_widget.mapToGlobal(pos)
+    menu.exec_(global_pos)
+
+def add_hyperlink_to_selection(text_widget, cursor):
+    selected_text = cursor.selectedText()
+    url, ok = QtWidgets.QInputDialog.getText(
+        text_widget, 
+        "Add Hyperlink", 
+        f"Enter URL for '{selected_text}':",
+        text="https://"
+    )
+    if ok and url.strip():
+        link_format = QtGui.QTextCharFormat()
+        link_format.setAnchor(True)
+        link_format.setAnchorHref(url.strip())
+        link_format.setForeground(QtGui.QColor("#0066cc" if not dark_mode else "#4da6ff"))
+        link_format.setUnderlineStyle(QtGui.QTextCharFormat.SingleUnderline)
+        cursor.mergeCharFormat(link_format)
+        text_widget.setTextCursor(cursor)
+
+def remove_hyperlink_from_selection(text_widget, cursor):
+    normal_format = QtGui.QTextCharFormat()
+    normal_format.setAnchor(False)
+    normal_format.setAnchorHref("")
+    normal_format.setForeground(QtGui.QColor("white" if dark_mode else "black"))
+    normal_format.setUnderlineStyle(QtGui.QTextCharFormat.NoUnderline)
+    cursor.mergeCharFormat(normal_format)
+    text_widget.setTextCursor(cursor)
+def insert_hyperlink_at_cursor(text_widget):
+    display_text, ok1 = QtWidgets.QInputDialog.getText(
+        text_widget, 
+        "Insert Hyperlink", 
+        "Enter display text:"
+    )
+    if ok1 and display_text.strip():
+        url, ok2 = QtWidgets.QInputDialog.getText(
+            text_widget, 
+            "Insert Hyperlink", 
+            f"Enter URL for '{display_text.strip()}':",
+            text="https://"
+        )
+        if ok2 and url.strip():
+            cursor = text_widget.textCursor()
+            link_format = QtGui.QTextCharFormat()
+            link_format.setAnchor(True)
+            link_format.setAnchorHref(url.strip())
+            link_format.setForeground(QtGui.QColor("#0066cc" if not dark_mode else "#4da6ff"))
+            link_format.setUnderlineStyle(QtGui.QTextCharFormat.SingleUnderline)
+            cursor.insertText(display_text.strip(), link_format)
+            normal_format = QtGui.QTextCharFormat()
+            normal_format.setAnchor(False)
+            normal_format.setForeground(QtGui.QColor("white" if dark_mode else "black"))
+            normal_format.setUnderlineStyle(QtGui.QTextCharFormat.NoUnderline)
+            cursor.setCharFormat(normal_format)
+            text_widget.setTextCursor(cursor)
+
 def update_ui():
     global toolbar, entries_layout, active_profile, edit_mode, dark_mode, data
     global title_entries, text_entries, hotkey_entries, profile_entries
-    # Clear entry lists
     title_entries = []
     text_entries = []
     hotkey_entries = []
     profile_entries = {}
-    # Farben definieren
     bg    = "#2e2e2e" if dark_mode else "#eeeeee"
     fg    = "white"   if dark_mode else "black"
     ebg   = "#3c3c3c" if dark_mode else "white"
     bbg   = "#444"    if dark_mode else "#cccccc"
-
     win.setStyleSheet(f"background:{bg};")
     toolbar.setStyleSheet(f"background:{bg}; border: none;")
     container.setStyleSheet(f"background:{bg};")
-    
-    # Style status bar to match theme
     win.statusBar().setStyleSheet(f"""
         QStatusBar {{
             background: {bg};
@@ -936,33 +1151,24 @@ def update_ui():
             border-top: 1px solid #666;
         }}
     """)
-
     toolbar.clear()
     profs = [p for p in data["profiles"] if p!="SDE"]
     if not edit_mode and "SDE" in data["profiles"]:
         profs.append("SDE")
-
-
     for prof in profs:
         frame = QtWidgets.QWidget()
         frame.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
         layout = QtWidgets.QHBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
-
-        # In edit mode, show profile name input and buttons for non-SDE profiles
-        # But also show clickable buttons for all profiles to allow switching
         if edit_mode and prof != "SDE":
-            # Profile name input field
             entry = QtWidgets.QLineEdit(prof)
-            entry.setFixedWidth(80)  # Slightly smaller to make room for switch button
+            entry.setFixedWidth(80)
             entry.setStyleSheet(
                 f"background:{ebg}; color:{fg}; border-radius:5px; padding:4px;"
             )
             profile_entries[prof] = entry
             layout.addWidget(entry)
-
-            # Switch to this profile button (new)
             switch_btn = QtWidgets.QPushButton("🖊️" if prof == active_profile else "🖊️")
             switch_btn.setFixedWidth(28)
             switch_btn.setStyleSheet(
@@ -976,8 +1182,6 @@ def update_ui():
             switch_btn.setToolTip(f"Zu Profil '{prof}' wechseln")
             switch_btn.clicked.connect(lambda _, p=prof: switch_profile(p))
             layout.addWidget(switch_btn)
-
-            # Delete button
             delete_btn = QtWidgets.QPushButton("❌")
             delete_btn.setFixedWidth(28)
             delete_btn.setStyleSheet(
@@ -986,7 +1190,6 @@ def update_ui():
             delete_btn.clicked.connect(lambda _, p=prof: delete_profile(p))
             layout.addWidget(delete_btn)
         else:
-            # Normal profile button (or SDE in edit mode)
             btn = QtWidgets.QPushButton(prof)
             btn.setStyleSheet(
                 f"""
@@ -1004,17 +1207,10 @@ def update_ui():
             )
             btn.clicked.connect(lambda _,p=prof: switch_profile(p))
             layout.addWidget(btn)
-
         toolbar.addWidget(frame)
-
-
-
-    # Spacer to push action buttons to the right
     spacer = QtWidgets.QWidget()
     spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     toolbar.addWidget(spacer)
-
-    # Add "➕ Profil" button just left of dark mode button in edit mode
     if edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
         ap.setStyleSheet(
@@ -1032,8 +1228,6 @@ def update_ui():
         )
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
-
-    # Action buttons (right side, except Help)
     for text, func, tooltip in [
         ("🌙" if not dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
         ("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten")
@@ -1057,8 +1251,6 @@ def update_ui():
         )
         b.clicked.connect(func)
         toolbar.addWidget(b)
-
-    # Help button (always far right)
     help_btn = QtWidgets.QPushButton("❓")
     help_btn.setToolTip("Hilfe anzeigen")
     help_btn.setStyleSheet(
@@ -1078,35 +1270,24 @@ def update_ui():
     )
     help_btn.clicked.connect(show_help_dialog)
     toolbar.addWidget(help_btn)
-
-
-    # Einträge im ScrollArea aktualisieren
-    # Alt löschen
     while entries_layout.count():
         w = entries_layout.takeAt(0).widget()
         if w: w.deleteLater()
-
     prof_data = data["profiles"][active_profile]
     titles, texts, hks = prof_data["titles"], prof_data["texts"], prof_data["hotkeys"]
-    max_t = 120  # fixed width for title
-    max_h = 120  # fixed width for hotkey
-
+    max_t = 120
+    max_h = 120
     for i, title in enumerate(titles):
-        # Use custom drag-drop widget in edit mode
         if edit_mode:
             row = DragDropWidget(i)
         else:
             row = QtWidgets.QWidget()
-        
         hl  = QtWidgets.QHBoxLayout(row)
-        hl.setContentsMargins(8, 4, 8, 4)  # Slightly more padding
-        hl.setSpacing(12)  # More space between elements
-
-        # Add drag & drop functionality in edit mode
+        hl.setContentsMargins(8, 4, 8, 4)
+        hl.setSpacing(12)
         if edit_mode:
-            # Add drag handle
             drag_handle = QtWidgets.QLabel("☰")
-            drag_handle.setFixedSize(20, 28)  # Set both width and height for more compact appearance
+            drag_handle.setFixedSize(20, 28)
             drag_handle.setStyleSheet(f"""
                 color: {fg}; 
                 background: {bbg}; 
@@ -1118,18 +1299,11 @@ def update_ui():
             """)
             drag_handle.setAlignment(QtCore.Qt.AlignCenter)
             drag_handle.setToolTip("Ziehen zum Verschieben")
-            
-            # Store index for drag operations
             row.drag_index = i
             drag_handle.drag_index = i
-            
-            # Enable drag and drop
             row.setAcceptDrops(True)
             drag_handle.mousePressEvent = lambda event, idx=i: start_drag(event, idx, drag_handle)
-            
             hl.addWidget(drag_handle)
-
-        # Title
         if edit_mode:
             et = QtWidgets.QLineEdit(title)
             et.setFixedWidth(max_t)
@@ -1140,7 +1314,7 @@ def update_ui():
         else:
             lt = QtWidgets.QLabel(title)
             lt.setFixedWidth(max_t)
-            lt.setFixedHeight(40)  # Match button height
+            lt.setFixedHeight(40)
             lt.setStyleSheet(f"""
                 color: {fg}; 
                 background: {ebg}; 
@@ -1150,25 +1324,23 @@ def update_ui():
                 border-radius: 6px;
                 font-size: 13px;
             """)
-            lt.setAlignment(QtCore.Qt.AlignVCenter)  # Vertical center alignment
+            lt.setAlignment(QtCore.Qt.AlignVCenter)
             hl.addWidget(lt)
-
-        # Text
         if edit_mode:
             ex = QtWidgets.QTextEdit(texts[i])
-            ex.setMaximumHeight(80)  # Limit height for better layout
-            ex.setMinimumHeight(60)  # Minimum height for usability
+            ex.setMaximumHeight(80)
+            ex.setMinimumHeight(60)
             ex.setStyleSheet(f"background:{ebg}; color:{fg};")
-            ex.setAcceptRichText(True)  # Enable rich text support
-            ex.setHtml(texts[i])  # Set initial content as HTML
-            # Use a lambda that captures the current index correctly
+            ex.setAcceptRichText(True)
+            ex.setHtml(texts[i])
+            ex.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            ex.customContextMenuRequested.connect(lambda pos, widget=ex: show_text_context_menu(pos, widget))
             def make_text_handler(idx):
                 return lambda: prof_data['texts'].__setitem__(idx, ex.toHtml())
             ex.textChanged.connect(make_text_handler(i))
             hl.addWidget(ex, 1)
             text_entries.append(ex)
         else:
-            # Create a clickable button that shows only the first line of text
             text_btn = QtWidgets.QPushButton()
             text_btn.setStyleSheet(f"""
                 QPushButton {{
@@ -1188,84 +1360,59 @@ def update_ui():
                     background: {'#555' if dark_mode else '#e0e0e0'};
                 }}
             """)
-            text_btn.setFixedHeight(40)  # Fixed height for consistent appearance
+            text_btn.setFixedHeight(40)
             text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i]}")
-            
-            # Extract and display only the first line of text
             display_text = QtGui.QTextDocument()
             display_text.setHtml(texts[i])
             plain_text = display_text.toPlainText()
-            
-            # Get only the first line
             first_line = plain_text.split('\n')[0].strip()
-            
-            # Truncate if too long for display
             if len(first_line) > 50:
                 display_text = first_line[:47] + "..."
             else:
                 display_text = first_line if first_line else "(Leer)"
-            
             text_btn.setText(display_text)
-            
-            # Connect click to copy function
             def make_copy_handler(idx):
                 return lambda: copy_text_to_clipboard(idx)
             text_btn.clicked.connect(make_copy_handler(i))
-            
             hl.addWidget(text_btn, 1)
-
-        # Hotkey
         if edit_mode:
             eh = QtWidgets.QLineEdit(hks[i])
             eh.setFixedWidth(max_h)
             eh.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
-            
-            # Add hotkey validation when editing finishes
             def validate_and_set_hotkey(idx, widget):
                 hotkey = widget.text().strip().lower()
                 erlaubte_zeichen = "1234567890befhmpqvxz§'^"
-                
-                if hotkey:  # Only validate if not empty
+                if hotkey:
                     parts = hotkey.split("+")
                     if (len(parts) != 3 or 
                         parts[0] != "ctrl" or 
                         parts[1] != "shift" or 
                         parts[2] not in erlaubte_zeichen):
-                        
                         show_critical_message(
                             "Fehler", 
                             f"Ungültiger Hotkey \"{widget.text()}\" für Eintrag {idx+1}.\n"
                             f"Erlaubte Zeichen: {erlaubte_zeichen}\n"
                             f"Format: ctrl+shift+[zeichen]"
                         )
-                        # Reset to original value
                         widget.setText(hks[idx])
                         return
-                    
-                    # Check for duplicates in current profile
                     current_hotkeys = [entry.text().strip().lower() for j, entry in enumerate(hotkey_entries) if j != idx]
                     if hotkey in current_hotkeys:
                         show_critical_message(
                             "Fehler", 
                             f"Hotkey \"{widget.text()}\" wird bereits in diesem Profil verwendet!"
                         )
-                        # Reset to original value
                         widget.setText(hks[idx])
                         return
-                
-                # If validation passed, update the data
                 prof_data['hotkeys'][idx] = widget.text()
-            
             eh.editingFinished.connect(lambda idx=i, w=eh: validate_and_set_hotkey(idx, w))
             hl.addWidget(eh)
             hotkey_entries.append(eh)
-            
-            # Add delete button after hotkey
             delete_btn = QtWidgets.QPushButton("❌")
             delete_btn.setFixedSize(20, 20)
             delete_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: #d32f2f; 
+                    background: {'#4a4a4a' if dark_mode else '#f0f0f0'}; 
                     color: white; 
                     border: 1px solid #b71c1c;
                     border-radius: 3px;
@@ -1279,7 +1426,7 @@ def update_ui():
         else:
             lh = QtWidgets.QLabel(hks[i])
             lh.setFixedWidth(max_h)
-            lh.setFixedHeight(40)  # Match button height
+            lh.setFixedHeight(40)
             lh.setStyleSheet(f"""
                 color: {fg}; 
                 background: {ebg}; 
@@ -1289,12 +1436,11 @@ def update_ui():
                 font-size: 13px;
                 font-family: 'Consolas', 'Monaco', monospace;
             """)
-            lh.setAlignment(QtCore.Qt.AlignCenter)  # Center alignment for hotkeys
+            lh.setAlignment(QtCore.Qt.AlignCenter)
             hl.addWidget(lh)
 
         entries_layout.addWidget(row)
 
-    # — Save/Add am Ende im Edit‑Mode —
     if edit_mode:
         bw = QtWidgets.QWidget()
         bl = QtWidgets.QHBoxLayout(bw)
@@ -1303,7 +1449,7 @@ def update_ui():
         bs.setStyleSheet("background:green;color:white;")
         bs.clicked.connect(save_data)
         bl.addWidget(bs)
-        ba = QtWidgets.QPushButton("➕ Neuen Eintrag")
+        ba = QtWidgets.QPushButton("➕ Eintrag hinzufügen")
         ba.setStyleSheet(f"background:{bbg}; color:{fg};")
         ba.clicked.connect(add_new_entry)
         bl.addWidget(ba)
@@ -1318,18 +1464,14 @@ def update_ui():
 def show_help_dialog():
     help_text = (
         "QuickPaste Hilfe\n\n"
-        "Wichtig: In Outlook kann es vorkommen, dass die Tastenkombination (z. B. Ctrl + Shift + 1) nicht sofort reagiert.\n"
-        "Stellen Sie sicher, dass Sie die Zahl direkt nach 'Ctrl + Shift' drücken und versuchen Sie es ein zweites Mal.\n\n"
-        "• Hotkeys aktiv: Aktiviert/Deaktiviert die Tastenkombinationen.\n"
-        "   Wenn deaktiviert, greifen Windows Standardfunktionen.\n\n"
-        "• ☾ / 🔆 Dunkelmodus: Wechselt zwischen hell/dunkel.\n\n"
+        "• 🌙/🌞 Dunkelmodus: Wechselt zwischen hell/dunkel.\n\n"
         "• 🔧 Bearbeiten: Titel, Texte und Hotkeys anpassen.\n\n"
         "• ➕ Profil: Neues Textprofil erstellen.\n"
-        "• �/📁 Profil wechseln: Im Bearbeitungsmodus zwischen Profilen wechseln.\n"
-        "• ❌ Löschen: Profil entfernen (ausser SDE).\n\n"
-        "• ↕ Verschieben: Einträge per Drag & Drop umsortieren.\n"
-        "• ❌ Eintrag löschen: Klick auf ❌ neben dem Eintrag.\n"
-        "• ➕ Eintrag: Neuer Eintrag hinzufügen.\n"
+        "• 🖊️ Im Bearbeitungsmodus zwischen Profilen wechseln.\n"
+        "• ❌ Löschen: Profil entfernen.\n\n"
+        "• ☰ Verschieben: Einträge per Drag & Drop umsortieren.\n"
+        "• ❌ Eintrag löschen.\n"
+        "• ➕ Eintrag hinzufügen: Fügt einen neuen Eintrag hinzu.\n"
         "• 💾 Speichern: Änderungen sichern.\n\n"
         "Bei Fragen oder Problemen: nico.wagner@bit.admin.ch"
     )
@@ -1340,7 +1482,6 @@ def show_help_dialog():
 #region darkmode
 
 def apply_dark_mode_to_messagebox(msg):
-    """Apply dark mode styling to a QMessageBox if dark mode is enabled."""
     if dark_mode:
         msg.setStyleSheet("""
             QMessageBox {
@@ -1375,7 +1516,6 @@ def apply_dark_mode_to_messagebox(msg):
             }
         """)
         
-        # Additional fallback: manually set button text color
         for button in msg.findChildren(QtWidgets.QPushButton):
             button.setStyleSheet("""
                 QPushButton {
@@ -1398,7 +1538,6 @@ def apply_dark_mode_to_messagebox(msg):
             """)
 
 def show_critical_message(title, text, parent=None):
-    """Show a critical message with proper dark mode styling."""
     if parent is None:
         parent = win
     msg = QtWidgets.QMessageBox(parent)
@@ -1409,7 +1548,6 @@ def show_critical_message(title, text, parent=None):
     return msg.exec_()
 
 def show_question_message(title, text, buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, parent=None):
-    """Show a question message with proper dark mode styling."""
     if parent is None:
         parent = win
     msg = QtWidgets.QMessageBox(parent)
@@ -1421,7 +1559,6 @@ def show_question_message(title, text, buttons=QtWidgets.QMessageBox.Yes | QtWid
     return msg.exec_()
 
 def show_information_message(title, text, parent=None):
-    """Show an information message with proper dark mode styling."""
     if parent is None:
         parent = win
     msg = QtWidgets.QMessageBox(parent)
@@ -1439,11 +1576,6 @@ def toggle_dark_mode():
 
 #endregion
 
-
-
-# ——————————————————————————————
-# Programmstart
-# ——————————————————————————————
 load_window_position()
 update_ui()
 create_tray_icon()
