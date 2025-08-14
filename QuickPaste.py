@@ -38,6 +38,9 @@ class QuickPasteState:
         self.active_profile = None
         self.profile_entries = {}
         self.last_ui_data = None
+        self.registered_hotkey_ids = []
+        self.id_to_index = {}
+        self.hotkey_filter_instance = None
 
 # Global application state
 app_state = QuickPasteState()
@@ -68,7 +71,7 @@ def save_data_atomic(data, filename):
     except Exception as e:
         try:
             os.unlink(temp_file.name)
-        except:
+        except (OSError, IOError):
             pass
         raise e
 
@@ -395,7 +398,7 @@ class ClipboardManager:
                 win32clipboard.OpenClipboard()
                 self.clipboard_opened = True
                 break
-            except:
+            except Exception:
                 time.sleep(0.01)
         return self
         
@@ -403,7 +406,7 @@ class ClipboardManager:
         if self.clipboard_opened:
             try:
                 win32clipboard.CloseClipboard()
-            except:
+            except Exception:
                 pass
                 
     def is_open(self):
@@ -613,26 +616,23 @@ def copy_text_to_clipboard(index):
 
 def cleanup_hotkeys():
     """Properly cleanup all registered hotkeys and event filters"""
-    global registered_hotkey_ids, id_to_index, hotkey_filter_instance
     
     # Unregister all hotkeys
-    if 'registered_hotkey_ids' in globals():
-        for hotkey_id in registered_hotkey_ids:
-            try:
-                ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
-            except Exception as e:
-                logging.warning(f"Failed to unregister hotkey {hotkey_id}: {e}")
-        registered_hotkey_ids.clear()
+    for hotkey_id in app_state.registered_hotkey_ids:
+        try:
+            ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+        except Exception as e:
+            logging.warning(f"Failed to unregister hotkey {hotkey_id}: {e}")
+    app_state.registered_hotkey_ids.clear()
     
     # Clear index mapping
-    if 'id_to_index' in globals():
-        id_to_index.clear()
+    app_state.id_to_index.clear()
     
     # Remove native event filter
-    if 'hotkey_filter_instance' in globals() and hotkey_filter_instance is not None:
+    if app_state.hotkey_filter_instance is not None:
         try:
-            app.removeNativeEventFilter(hotkey_filter_instance)
-            hotkey_filter_instance = None
+            app.removeNativeEventFilter(app_state.hotkey_filter_instance)
+            app_state.hotkey_filter_instance = None
         except Exception as e:
             logging.warning(f"Failed to remove native event filter: {e}")
 
@@ -672,11 +672,6 @@ def register_hotkeys():
     
     # --- Bestehende Registrierungen aufräumen (falls schon welche da sind) ---
     # Wir benutzen eigene Strukturen statt 'registered_hotkey_refs' (keyboard)
-    global registered_hotkey_ids, id_to_index, hotkey_filter_instance
-    if "registered_hotkey_ids" not in globals():
-        registered_hotkey_ids = []
-    if "id_to_index" not in globals():
-        id_to_index = {}
 
     # --- Hotkeys aus aktivem Profil einlesen & validieren ---
     erlaubte_zeichen = set("1234567890befhmpqvxz")  # wie bisher, aber ohne Sonderzeichen
@@ -730,15 +725,15 @@ def register_hotkeys():
             fehler = True
             continue
 
-        id_to_index[next_id] = i
-        registered_hotkey_ids.append(next_id)
+        app_state.id_to_index[next_id] = i
+        app_state.registered_hotkey_ids.append(next_id)
         next_id += 1
 
-    logging.info(f"Registered {len(registered_hotkey_ids)} hotkeys for profile '{app_state.active_profile}'")
+    logging.info(f"Registered {len(app_state.registered_hotkey_ids)} hotkeys for profile '{app_state.active_profile}'")
 
     # --- NativeEventFilter einmalig installieren, um WM_HOTKEY zu empfangen ---
     # Wir definieren den Filter lokal und installieren ihn nur einmal.
-    if "hotkey_filter_instance" not in globals() or hotkey_filter_instance is None:
+    if app_state.hotkey_filter_instance is None:
         class _MSG(ctypes.Structure):
             _fields_ = [
                 ("hwnd",    wintypes.HWND),
@@ -759,7 +754,7 @@ def register_hotkeys():
                     if msg.message == WM_HOTKEY:
                         try:
                             hotkey_id = int(msg.wParam)
-                            idx = id_to_index.get(hotkey_id)
+                            idx = app_state.id_to_index.get(hotkey_id)
                             if idx is not None:
                                 # Wir sind im Qt-Mainthread – direkt einfügen
                                 insert_text(idx)
@@ -767,8 +762,8 @@ def register_hotkeys():
                             logging.exception(f"Fehler im WM_HOTKEY-Handler: {e}")
                 return False, 0
 
-        hotkey_filter_instance = _HotkeyFilter()
-        app.installNativeEventFilter(hotkey_filter_instance)
+        app_state.hotkey_filter_instance = _HotkeyFilter()
+        app.installNativeEventFilter(app_state.hotkey_filter_instance)
         
         # Add cleanup to application exit
         app.aboutToQuit.connect(cleanup_hotkeys)
@@ -856,7 +851,7 @@ def clear_all_highlights():
                 widget = item.widget()
                 if isinstance(widget, DragDropWidget) and hasattr(widget, 'highlight_drop_zone'):
                     widget.highlight_drop_zone(False)
-    except:
+    except Exception:
         pass
 class DragDropWidget(QtWidgets.QWidget):
     def __init__(self, index, parent=None):
@@ -1444,7 +1439,9 @@ def update_ui():
             et = QtWidgets.QLineEdit(title)
             et.setFixedWidth(max_t)
             et.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
-            et.editingFinished.connect(partial(lambda w, idx: prof_data['titles'].__setitem__(idx, w.text()), w=et, idx=i))
+            def update_title(widget, index):
+                app_state.data["profiles"][app_state.active_profile]["titles"][index] = widget.text()
+            et.editingFinished.connect(partial(update_title, et, i))
             hl.addWidget(et)
             app_state.title_entries.append(et)
         else:
@@ -1470,8 +1467,10 @@ def update_ui():
             ex.setAcceptRichText(True)
             ex.setHtml(texts[i])
             ex.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            ex.customContextMenuRequested.connect(lambda pos, widget=ex: show_text_context_menu(pos, widget))
-            ex.textChanged.connect(partial(lambda widget, idx: prof_data['texts'].__setitem__(idx, widget.toHtml()), widget=ex, idx=i))
+            ex.customContextMenuRequested.connect(partial(show_text_context_menu, widget=ex))
+            def update_text(widget, index):
+                app_state.data["profiles"][app_state.active_profile]["texts"][index] = widget.toHtml()
+            ex.textChanged.connect(partial(update_text, ex, i))
             hl.addWidget(ex, 1)
             app_state.text_entries.append(ex)
         else:
@@ -1536,7 +1535,7 @@ def update_ui():
                         )
                         widget.setText(hks[idx])
                         return
-                prof_data['hotkeys'][idx] = widget.text()
+                app_state.data["profiles"][app_state.active_profile]["hotkeys"][idx] = widget.text()
             eh.editingFinished.connect(partial(validate_and_set_hotkey, idx=i, widget=eh))
             hl.addWidget(eh)
             app_state.hotkey_entries.append(eh)
