@@ -1,11 +1,14 @@
 import sys, os, json, re, ctypes, logging
 from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtCore import QByteArray
+from PyQt5.QtCore import QByteArray, QThread, pyqtSignal
 import time
 import pyperclip
 from PyQt5.QtWidgets import QSystemTrayIcon, QAction, QMenu
 import win32clipboard
 import win32con
+from functools import partial
+import tempfile
+import shutil
 
 APPDATA_PATH = os.path.join(os.environ["APPDATA"], "QuickPaste")
 os.makedirs(APPDATA_PATH, exist_ok=True)
@@ -16,19 +19,77 @@ LOG_FILE = os.path.join(APPDATA_PATH, "qp.log")
 logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", encoding="utf-8")
 BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "H.ico")
-dark_mode = False
-registered_hotkey_refs = []
-unsaved_changes = False
-dragged_index = None
-current_target = None
-profile_buttons = {}
-profile_lineedits = {}
-edit_mode = False
-text_entries = []
-title_entries = []
-hotkey_entries = []
-tray = None
-registered_hotkey_refs = []
+class QuickPasteState:
+    """Centralized application state management"""
+    def __init__(self):
+        self.dark_mode = False
+        self.registered_hotkey_refs = []
+        self.unsaved_changes = False
+        self.dragged_index = None
+        self.current_target = None
+        self.profile_buttons = {}
+        self.profile_lineedits = {}
+        self.edit_mode = False
+        self.text_entries = []
+        self.title_entries = []
+        self.hotkey_entries = []
+        self.tray = None
+        self.data = None
+        self.active_profile = None
+        self.profile_entries = {}
+        self.last_ui_data = None
+        self.registered_hotkey_ids = []
+        self.id_to_index = {}
+        self.hotkey_filter_instance = None
+
+# Global application state
+app_state = QuickPasteState()
+
+class DebouncedSaver:
+    """Debounced file saving to prevent excessive writes"""
+    def __init__(self, delay_ms=1000):
+        self.timer = QtCore.QTimer()
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self._save)
+        self.pending_data = None
+    
+    def schedule_save(self, data):
+        self.pending_data = data
+        self.timer.start()
+    
+    def _save(self):
+        if self.pending_data:
+            save_data_atomic(self.pending_data, CONFIG_FILE)
+
+def save_data_atomic(data, filename):
+    """Atomic file write to prevent corruption"""
+    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8')
+    try:
+        json.dump(data, temp_file, indent=4)
+        temp_file.close()
+        shutil.move(temp_file.name, filename)
+    except Exception as e:
+        try:
+            os.unlink(temp_file.name)
+        except (OSError, IOError):
+            pass
+        raise e
+
+# Initialize debounced saver
+debounced_saver = DebouncedSaver()
+
+class ClipboardWorker(QThread):
+    """Non-blocking clipboard operations"""
+    finished = pyqtSignal(bool)
+    
+    def __init__(self, html_content, plain_text_content):
+        super().__init__()
+        self.html_content = html_content
+        self.plain_text_content = plain_text_content
+    
+    def run(self):
+        success = set_clipboard_html(self.html_content, self.plain_text_content)
+        self.finished.emit(success)
 
 #region window position 
 
@@ -36,7 +97,7 @@ def save_window_position():
     try:
         geo_bytes = win.saveGeometry()
         geo_hex   = bytes(geo_bytes.toHex()).decode()
-        cfg = {"geometry_hex": geo_hex, "dark_mode": dark_mode}
+        cfg = {"geometry_hex": geo_hex, "dark_mode": app_state.dark_mode}
         tmp = WINDOW_CONFIG + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
@@ -45,12 +106,11 @@ def save_window_position():
         logging.exception(f"⚠ Fehler beim Speichern der Fensterposition: {e}")
 
 def load_window_position():
-    global dark_mode
     try:
         with open(WINDOW_CONFIG, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         if cfg.get("dark_mode") is not None:
-            dark_mode = cfg["dark_mode"]
+            app_state.dark_mode = cfg["dark_mode"]
         hexstr = cfg.get("geometry_hex")
         if hexstr:
             ba = QByteArray.fromHex(hexstr.encode())
@@ -63,14 +123,13 @@ def load_window_position():
 #endregion
 
 def refresh_tray():
-    global tray
-    if tray is not None:
+    if app_state.tray is not None:
         try:
-            tray.hide()
-            tray.deleteLater()
-        except:
-            pass
-        tray = None
+            app_state.tray.hide()
+            app_state.tray.deleteLater()
+        except Exception as e:
+            logging.warning(f"Failed to cleanup tray: {e}")
+        app_state.tray = None
     create_tray_icon()
 
 #region data
@@ -129,8 +188,9 @@ def load_data():
             },
             "active_profile": "Profil 1"
         }
-data = load_data()
-active_profile = data.get("active_profile")
+# Initialize application data
+app_state.data = load_data()
+app_state.active_profile = app_state.data.get("active_profile", list(app_state.data["profiles"].keys())[0])
 
 #endregion 
 
@@ -138,15 +198,15 @@ active_profile = data.get("active_profile")
 
 def has_field_changes(profile_to_check=None):
     if profile_to_check is None:
-        profile_to_check = active_profile
-    prof = data["profiles"][profile_to_check]
+        profile_to_check = app_state.active_profile
+    prof = app_state.data["profiles"][profile_to_check]
     titles, texts, hks = [], [], []
     for i in range(entries_layout.count()):
         item = entries_layout.itemAt(i)
         if item is None:
             continue
         row = item.widget()
-        if edit_mode and isinstance(row, QtWidgets.QWidget):
+        if app_state.edit_mode and isinstance(row, QtWidgets.QWidget):
             line_edits = row.findChildren(QtWidgets.QLineEdit)
             text_edits = row.findChildren(QtWidgets.QTextEdit)
             if len(line_edits) >= 2 and len(text_edits) >= 1:
@@ -158,27 +218,26 @@ def has_field_changes(profile_to_check=None):
          or hks    != prof["hotkeys"])
 
 def save_profile_names():
-    global data, active_profile
-    if not edit_mode:
+    if not app_state.edit_mode:
         return
     new_profiles = {}
-    for old, le in profile_lineedits.items():
+    for old, le in app_state.profile_lineedits.items():
         new = le.text().strip()
         if new and new not in new_profiles:
-            new_profiles[new] = data["profiles"].pop(old)
+            new_profiles[new] = app_state.data["profiles"].pop(old)
         else:
             show_critical_message("Fehler", f"Profilname '{new}' ungültig oder doppelt!")
             return
-    data["profiles"] = new_profiles
-    if active_profile not in data["profiles"]:
-        active_profile = next(iter(data["profiles"]))
-    data["active_profile"] = active_profile
+    app_state.data["profiles"] = new_profiles
+    if app_state.active_profile not in app_state.data["profiles"]:
+        app_state.active_profile = next(iter(app_state.data["profiles"]))
+    app_state.data["active_profile"] = app_state.active_profile
     save_data()
     update_ui()
 
 def update_profile_buttons():
-    for prof, btn in profile_buttons.items():
-        if prof == active_profile:
+    for prof, btn in app_state.profile_buttons.items():
+        if prof == app_state.active_profile:
             btn.setStyleSheet("background: lightblue; font-weight: bold;")
         else:
             btn.setStyleSheet("")
@@ -219,25 +278,24 @@ def validate_profile_data(titles, texts, hotkeys):
     return titles, texts, validated_hotkeys
 
 def switch_profile(profile_name):
-    global active_profile
-    if profile_name == active_profile:
+    if profile_name == app_state.active_profile:
         return
-    if edit_mode and title_entries and text_entries and hotkey_entries:
-        current_titles = [entry.text() for entry in title_entries]
+    if app_state.edit_mode and app_state.title_entries and app_state.text_entries and app_state.hotkey_entries:
+        current_titles = [entry.text() for entry in app_state.title_entries]
         current_texts = []
-        for entry in text_entries:
+        for entry in app_state.text_entries:
             if hasattr(entry, 'toHtml'):
                 current_texts.append(entry.toHtml())
             else:
                 current_texts.append(entry.text())
-        current_hks = [entry.text() for entry in hotkey_entries]
+        current_hks = [entry.text() for entry in app_state.hotkey_entries]
         
         # Validate and synchronize data before saving
         validated_titles, validated_texts, validated_hotkeys = validate_profile_data(
             current_titles, current_texts, current_hks
         )
         
-        stored_data = data["profiles"][active_profile]
+        stored_data = app_state.data["profiles"][app_state.active_profile]
         stored_plain_texts = []
         for stored_text in stored_data["texts"]:
             if '<' in stored_text and '>' in stored_text:
@@ -261,57 +319,53 @@ def switch_profile(profile_name):
                 return
             if resp == QtWidgets.QMessageBox.Yes:
                 # Save validated data
-                data["profiles"][active_profile]["titles"] = validated_titles
-                data["profiles"][active_profile]["texts"] = validated_texts
-                data["profiles"][active_profile]["hotkeys"] = validated_hotkeys
+                app_state.data["profiles"][app_state.active_profile]["titles"] = validated_titles
+                app_state.data["profiles"][app_state.active_profile]["texts"] = validated_texts
+                app_state.data["profiles"][app_state.active_profile]["hotkeys"] = validated_hotkeys
                 
-                profiles_to_save = {k: v for k, v in data["profiles"].items() if k != "SDE"}
-                with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                    json.dump({"profiles": profiles_to_save, "active_profile": profile_name}, f, indent=4)
+                profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
+                debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
             elif resp == QtWidgets.QMessageBox.No:
                 try:
                     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                         file_data = json.load(f)
-                    if active_profile in file_data.get("profiles", {}):
-                        data["profiles"][active_profile] = file_data["profiles"][active_profile].copy()
+                    if app_state.active_profile in file_data.get("profiles", {}):
+                        app_state.data["profiles"][app_state.active_profile] = file_data["profiles"][app_state.active_profile].copy()
                 except (FileNotFoundError, json.JSONDecodeError, KeyError):
                     pass
     
-    if profile_name not in data["profiles"]:
+    if profile_name not in app_state.data["profiles"]:
         show_critical_message("Fehler", f"Profil '{profile_name}' existiert nicht!")
         return
-    active_profile = profile_name
-    data["active_profile"] = profile_name
-    profiles_to_save = {k: v for k, v in data["profiles"].items() if k != "SDE"}
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump({"profiles": profiles_to_save, "active_profile": profile_name}, f, indent=4)
+    app_state.active_profile = profile_name
+    app_state.data["active_profile"] = profile_name
+    profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
+    debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
     update_profile_buttons()
     update_ui()
 
 def add_new_profile():
-    global active_profile
-    if len(data["profiles"]) >= 11:
+    if len(app_state.data["profiles"]) >= 11:
         show_critical_message("Limit erreicht", "Maximal 10 Profile erlaubt!")
         return
     base, cnt = "Profil", 1
-    while f"{base} {cnt}" in data["profiles"]:
+    while f"{base} {cnt}" in app_state.data["profiles"]:
         cnt += 1
     name = f"{base} {cnt}"
-    data["profiles"][name] = {
+    app_state.data["profiles"][name] = {
         "titles":  [f"Titel {i+1}" for i in range(3)],
         "texts":   [f"Text {i+1}"  for i in range(3)],
         "hotkeys": [f"ctrl+shift+{i+1}" for i in range(3)]
     }
-    active_profile = name
-    data["active_profile"] = name
+    app_state.active_profile = name
+    app_state.data["active_profile"] = name
     update_ui()
 
 def delete_profile(profile_name):
-    global active_profile
     if profile_name == "SDE":
         show_critical_message("Fehler", "Das SDE‑Profil kann nicht gelöscht werden.")
         return
-    if len(data["profiles"]) <= 1:
+    if len(app_state.data["profiles"]) <= 1:
         show_critical_message("Fehler", "Mindestens ein Profil muss bestehen bleiben!")
         return
     resp = show_question_message(
@@ -320,10 +374,10 @@ def delete_profile(profile_name):
     )
     if resp != QtWidgets.QMessageBox.Yes:
         return
-    del data["profiles"][profile_name]
-    if active_profile == profile_name:
-        active_profile = next(iter(data["profiles"]))
-        data["active_profile"] = active_profile
+    del app_state.data["profiles"][profile_name]
+    if app_state.active_profile == profile_name:
+        app_state.active_profile = next(iter(app_state.data["profiles"]))
+        app_state.data["active_profile"] = app_state.active_profile
     update_ui()
     save_data()
 
@@ -344,7 +398,7 @@ class ClipboardManager:
                 win32clipboard.OpenClipboard()
                 self.clipboard_opened = True
                 break
-            except:
+            except Exception:
                 time.sleep(0.01)
         return self
         
@@ -352,7 +406,7 @@ class ClipboardManager:
         if self.clipboard_opened:
             try:
                 win32clipboard.CloseClipboard()
-            except:
+            except Exception:
                 pass
                 
     def is_open(self):
@@ -473,11 +527,11 @@ def insert_text(index):
         user32.keybd_event(0x11, 0, 2, 0)   # Ctrl up
 
     try:
-        txt = data["profiles"][active_profile]["texts"][index]
+        txt = app_state.data["profiles"][app_state.active_profile]["texts"][index]
         logging.info(f"Inserting text for index {index}: {txt[:50]}...")
     except IndexError:
         logging.exception(
-            f"Kein Text vorhanden für Hotkey-Index {index} im Profil '{active_profile}'"
+            f"Kein Text vorhanden für Hotkey-Index {index} im Profil '{app_state.active_profile}'"
         )
         return
 
@@ -532,10 +586,10 @@ def insert_text(index):
 
 def copy_text_to_clipboard(index):
     try:
-        txt = data["profiles"][active_profile]["texts"][index]
+        txt = app_state.data["profiles"][app_state.active_profile]["texts"][index]
     except IndexError:
         logging.exception(
-            f"Kein Text vorhanden für Index {index} im Profil '{active_profile}'"
+            f"Kein Text vorhanden für Index {index} im Profil '{app_state.active_profile}'"
         )
         return
     try:
@@ -562,26 +616,23 @@ def copy_text_to_clipboard(index):
 
 def cleanup_hotkeys():
     """Properly cleanup all registered hotkeys and event filters"""
-    global registered_hotkey_ids, id_to_index, hotkey_filter_instance
     
     # Unregister all hotkeys
-    if 'registered_hotkey_ids' in globals():
-        for hotkey_id in registered_hotkey_ids:
-            try:
-                ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
-            except Exception as e:
-                logging.warning(f"Failed to unregister hotkey {hotkey_id}: {e}")
-        registered_hotkey_ids.clear()
+    for hotkey_id in app_state.registered_hotkey_ids:
+        try:
+            ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+        except Exception as e:
+            logging.warning(f"Failed to unregister hotkey {hotkey_id}: {e}")
+    app_state.registered_hotkey_ids.clear()
     
     # Clear index mapping
-    if 'id_to_index' in globals():
-        id_to_index.clear()
+    app_state.id_to_index.clear()
     
     # Remove native event filter
-    if 'hotkey_filter_instance' in globals() and hotkey_filter_instance is not None:
+    if app_state.hotkey_filter_instance is not None:
         try:
-            app.removeNativeEventFilter(hotkey_filter_instance)
-            hotkey_filter_instance = None
+            app.removeNativeEventFilter(app_state.hotkey_filter_instance)
+            app_state.hotkey_filter_instance = None
         except Exception as e:
             logging.warning(f"Failed to remove native event filter: {e}")
 
@@ -621,17 +672,12 @@ def register_hotkeys():
     
     # --- Bestehende Registrierungen aufräumen (falls schon welche da sind) ---
     # Wir benutzen eigene Strukturen statt 'registered_hotkey_refs' (keyboard)
-    global registered_hotkey_ids, id_to_index, hotkey_filter_instance
-    if "registered_hotkey_ids" not in globals():
-        registered_hotkey_ids = []
-    if "id_to_index" not in globals():
-        id_to_index = {}
 
     # --- Hotkeys aus aktivem Profil einlesen & validieren ---
     erlaubte_zeichen = set("1234567890befhmpqvxz")  # wie bisher, aber ohne Sonderzeichen
     belegte = set()
     fehler = False
-    hotkeys = data["profiles"].setdefault(active_profile, {}).setdefault("hotkeys", [])
+    hotkeys = app_state.data["profiles"].setdefault(app_state.active_profile, {}).setdefault("hotkeys", [])
 
     next_id = 1
     for i, hot in enumerate(hotkeys):
@@ -662,7 +708,7 @@ def register_hotkeys():
             continue
         belegte.add(hot)
 
-        if i >= len(data["profiles"][active_profile]["texts"]):
+        if i >= len(app_state.data["profiles"][app_state.active_profile]["texts"]):
             logging.warning(f"⚠ Hotkey '{hot}' zeigt auf Eintrag {i+1}, aber dieser existiert nicht.")
             continue
 
@@ -679,15 +725,15 @@ def register_hotkeys():
             fehler = True
             continue
 
-        id_to_index[next_id] = i
-        registered_hotkey_ids.append(next_id)
+        app_state.id_to_index[next_id] = i
+        app_state.registered_hotkey_ids.append(next_id)
         next_id += 1
 
-    logging.info(f"Registered {len(registered_hotkey_ids)} hotkeys for profile '{active_profile}'")
+    logging.info(f"Registered {len(app_state.registered_hotkey_ids)} hotkeys for profile '{app_state.active_profile}'")
 
     # --- NativeEventFilter einmalig installieren, um WM_HOTKEY zu empfangen ---
     # Wir definieren den Filter lokal und installieren ihn nur einmal.
-    if "hotkey_filter_instance" not in globals() or hotkey_filter_instance is None:
+    if app_state.hotkey_filter_instance is None:
         class _MSG(ctypes.Structure):
             _fields_ = [
                 ("hwnd",    wintypes.HWND),
@@ -708,7 +754,7 @@ def register_hotkeys():
                     if msg.message == WM_HOTKEY:
                         try:
                             hotkey_id = int(msg.wParam)
-                            idx = id_to_index.get(hotkey_id)
+                            idx = app_state.id_to_index.get(hotkey_id)
                             if idx is not None:
                                 # Wir sind im Qt-Mainthread – direkt einfügen
                                 insert_text(idx)
@@ -716,8 +762,8 @@ def register_hotkeys():
                             logging.exception(f"Fehler im WM_HOTKEY-Handler: {e}")
                 return False, 0
 
-        hotkey_filter_instance = _HotkeyFilter()
-        app.installNativeEventFilter(hotkey_filter_instance)
+        app_state.hotkey_filter_instance = _HotkeyFilter()
+        app.installNativeEventFilter(app_state.hotkey_filter_instance)
         
         # Add cleanup to application exit
         app.aboutToQuit.connect(cleanup_hotkeys)
@@ -730,20 +776,19 @@ def register_hotkeys():
 #region Tray
 
 def create_tray_icon():
-    global tray
-    if tray:
+    if app_state.tray:
         try:
-            tray.hide()
-            tray.deleteLater()
-        except:
-            pass
-        tray = None
-    tray = QSystemTrayIcon(QtGui.QIcon(ICON_PATH), win)
+            app_state.tray.hide()
+            app_state.tray.deleteLater()
+        except Exception as e:
+            logging.warning(f"Failed to cleanup tray: {e}")
+        app_state.tray = None
+    app_state.tray = QSystemTrayIcon(QtGui.QIcon(ICON_PATH), win)
     menu = QMenu()
-    for prof in data["profiles"]:
-        label = f"✓ {prof}" if prof == active_profile else f"  {prof}"
+    for prof in app_state.data["profiles"]:
+        label = f"✓ {prof}" if prof == app_state.active_profile else f"  {prof}"
         act = QAction(label, win)
-        act.triggered.connect(lambda _, p=prof: switch_profile(p))
+        act.triggered.connect(partial(switch_profile, prof))
         menu.addAction(act)
     menu.addSeparator()
     act_show = QAction("↑ Öffnen", win)
@@ -752,20 +797,20 @@ def create_tray_icon():
     act_quit = QAction("✖ Beenden", win)
     act_quit.triggered.connect(lambda: (save_window_position(), app.quit()))
     menu.addAction(act_quit)
-    tray.setContextMenu(menu)
-    tray.activated.connect(
+    app_state.tray.setContextMenu(menu)
+    app_state.tray.activated.connect(
         lambda reason:
             (win.show(), win.raise_(), win.activateWindow()) 
             if reason == QSystemTrayIcon.Trigger 
             else None
     )
-    tray.show()
+    app_state.tray.show()
 
 
 def minimize_to_tray():
     win.hide()
-    if tray and hasattr(tray, 'showMessage'):
-        tray.showMessage(
+    if app_state.tray and hasattr(app_state.tray, 'showMessage'):
+        app_state.tray.showMessage(
             "QuickPaste", 
             "Anwendung wurde in die Taskleiste minimiert. Hotkeys bleiben aktiv.",
             QSystemTrayIcon.Information, 
@@ -777,16 +822,15 @@ def minimize_to_tray():
 #region add/del/move/drag Entry
 
 def start_drag(event, index, widget):
-    global dragged_index, dark_mode
-    dragged_index = index
+    app_state.dragged_index = index
     row_widget = widget.parent()
     if hasattr(row_widget, 'highlight_drop_zone'):
         original_style = row_widget.styleSheet()
         row_widget.setStyleSheet(f"""
             QWidget {{
-                background-color: {'#1a1a1a' if dark_mode else '#f0f0f0'};
+                background-color: {'#1a1a1a' if app_state.dark_mode else '#f0f0f0'};
                 opacity: 0.6;
-                border: 1px dashed {'#666' if dark_mode else '#999'};
+                border: 1px dashed {'#666' if app_state.dark_mode else '#999'};
                 border-radius: 6px;
             }}
         """)
@@ -807,7 +851,7 @@ def clear_all_highlights():
                 widget = item.widget()
                 if isinstance(widget, DragDropWidget) and hasattr(widget, 'highlight_drop_zone'):
                     widget.highlight_drop_zone(False)
-    except:
+    except Exception:
         pass
 class DragDropWidget(QtWidgets.QWidget):
     def __init__(self, index, parent=None):
@@ -827,7 +871,6 @@ class DragDropWidget(QtWidgets.QWidget):
         super().dragLeaveEvent(event)
     
     def dropEvent(self, event):
-        global dragged_index
         self.highlight_drop_zone(False)
         if event.mimeData().hasText():
             source_index = int(event.mimeData().text())
@@ -837,11 +880,10 @@ class DragDropWidget(QtWidgets.QWidget):
             event.acceptProposedAction()
     
     def highlight_drop_zone(self, highlight):
-        global dark_mode
         if highlight and not self.is_highlighted:
             self.original_style = self.styleSheet()
-            highlight_color = "#4a90e2" if dark_mode else "#87ceeb"
-            border_color = "#5aa3f0" if dark_mode else "#4682b4"
+            highlight_color = "#4a90e2" if app_state.dark_mode else "#87ceeb"
+            border_color = "#5aa3f0" if app_state.dark_mode else "#4682b4"
             self.setStyleSheet(f"""
                 QWidget {{
                     background-color: {highlight_color};
@@ -855,8 +897,8 @@ class DragDropWidget(QtWidgets.QWidget):
             self.is_highlighted = False
 
 def move_entry(index, direction):
-    titles = data["profiles"][active_profile]["titles"]
-    texts = data["profiles"][active_profile]["texts"]
+    titles = app_state.data["profiles"][app_state.active_profile]["titles"]
+    texts = app_state.data["profiles"][app_state.active_profile]["texts"]
     if direction == "up" and index > 0:
         titles[index], titles[index-1] = titles[index-1], titles[index]
         texts[index], texts[index-1] = texts[index-1], texts[index]
@@ -866,15 +908,14 @@ def move_entry(index, direction):
     update_ui() 
 
 def add_new_entry():
-    global data
-    if "titles" not in data["profiles"][active_profile]:
-        data["profiles"][active_profile]["titles"] = []
-    if "texts" not in data["profiles"][active_profile]:
-        data["profiles"][active_profile]["texts"] = []
-    if "hotkeys" not in data["profiles"][active_profile]:
-        data["profiles"][active_profile]["hotkeys"] = []
+    if "titles" not in app_state.data["profiles"][app_state.active_profile]:
+        app_state.data["profiles"][app_state.active_profile]["titles"] = []
+    if "texts" not in app_state.data["profiles"][app_state.active_profile]:
+        app_state.data["profiles"][app_state.active_profile]["texts"] = []
+    if "hotkeys" not in app_state.data["profiles"][app_state.active_profile]:
+        app_state.data["profiles"][app_state.active_profile]["hotkeys"] = []
     erlaubte_zeichen = "1234567890befhmpqvxz§'^"
-    belegte_hotkeys = set(data["profiles"][active_profile]["hotkeys"])
+    belegte_hotkeys = set(app_state.data["profiles"][app_state.active_profile]["hotkeys"])
     neuer_hotkey = ""
     for zeichen in erlaubte_zeichen:
         test_hotkey = f"ctrl+shift+{zeichen}"
@@ -883,31 +924,30 @@ def add_new_entry():
             break
     if not neuer_hotkey:
         neuer_hotkey = "ctrl+shift+"  
-    data["profiles"][active_profile]["titles"].append("Neuer Eintrag")
-    data["profiles"][active_profile]["texts"].append("Neuer Text")
-    data["profiles"][active_profile]["hotkeys"].append(neuer_hotkey)
+    app_state.data["profiles"][app_state.active_profile]["titles"].append("Neuer Eintrag")
+    app_state.data["profiles"][app_state.active_profile]["texts"].append("Neuer Text")
+    app_state.data["profiles"][app_state.active_profile]["hotkeys"].append(neuer_hotkey)
     update_ui()
 
 def delete_entry(index):
-    global data
-    if "titles" not in data["profiles"][active_profile]:
-        data["profiles"][active_profile]["titles"] = []
-    if "texts" not in data["profiles"][active_profile]:
-        data["profiles"][active_profile]["texts"] = []
-    if "hotkeys" not in data["profiles"][active_profile]:
-        data["profiles"][active_profile]["hotkeys"] = []
-    if index < 0 or index >= len(data["profiles"][active_profile]["titles"]):
+    if "titles" not in app_state.data["profiles"][app_state.active_profile]:
+        app_state.data["profiles"][app_state.active_profile]["titles"] = []
+    if "texts" not in app_state.data["profiles"][app_state.active_profile]:
+        app_state.data["profiles"][app_state.active_profile]["texts"] = []
+    if "hotkeys" not in app_state.data["profiles"][app_state.active_profile]:
+        app_state.data["profiles"][app_state.active_profile]["hotkeys"] = []
+    if index < 0 or index >= len(app_state.data["profiles"][app_state.active_profile]["titles"]):
         show_critical_message("Fehler", "Ungültiger Eintrag zum Löschen ausgewählt!")
         return
-    del data["profiles"][active_profile]["titles"][index]
-    del data["profiles"][active_profile]["texts"][index]
-    del data["profiles"][active_profile]["hotkeys"][index]
+    del app_state.data["profiles"][app_state.active_profile]["titles"][index]
+    del app_state.data["profiles"][app_state.active_profile]["texts"][index]
+    del app_state.data["profiles"][app_state.active_profile]["hotkeys"][index]
     update_ui() 
     register_hotkeys() 
 
 def move_entry_to(old_index, new_index):
-    titles = data["profiles"][active_profile]["titles"]
-    texts = data["profiles"][active_profile]["texts"]
+    titles = app_state.data["profiles"][app_state.active_profile]["titles"]
+    texts = app_state.data["profiles"][app_state.active_profile]["texts"]
     title = titles.pop(old_index)
     text = texts.pop(old_index)
     titles.insert(new_index, title)
@@ -948,9 +988,9 @@ def on_drag_release(event):
     update_ui()
 
 def swap_entries(i, j):
-    titles = data["profiles"][active_profile]["titles"]
-    texts = data["profiles"][active_profile]["texts"]
-    hotkeys = data["profiles"][active_profile]["hotkeys"]
+    titles = app_state.data["profiles"][app_state.active_profile]["titles"]
+    texts = app_state.data["profiles"][app_state.active_profile]["texts"]
+    hotkeys = app_state.data["profiles"][app_state.active_profile]["hotkeys"]
     titles[i], titles[j] = titles[j], titles[i]
     texts[i], texts[j] = texts[j], texts[i]
 
@@ -959,8 +999,7 @@ def swap_entries(i, j):
 #region toggle edit mode
 
 def toggle_edit_mode():
-    global edit_mode
-    if edit_mode:
+    if app_state.edit_mode:
         if has_field_changes():
             resp = show_question_message(
                 "Ungespeicherte Änderungen",
@@ -970,56 +1009,54 @@ def toggle_edit_mode():
                 save_data()
             else:
                 reset_unsaved_changes()
-        edit_mode = False
+        app_state.edit_mode = False
         update_ui()
         return
-    is_sde_only = len(data["profiles"]) == 1 and "SDE" in data["profiles"]
-    if active_profile == "SDE" and not is_sde_only:
+    is_sde_only = len(app_state.data["profiles"]) == 1 and "SDE" in app_state.data["profiles"]
+    if app_state.active_profile == "SDE" and not is_sde_only:
         show_information_message("Nicht editierbar", "Das SDE-Profil kann nicht bearbeitet werden.")
         return
-    edit_mode = True
+    app_state.edit_mode = True
     update_ui()
 #endregion
 
 #region save_data
 
 def save_data(stay_in_edit_mode=False):
-    global data, tray, active_profile, profile_entries
     try:
-        if edit_mode and profile_entries:
+        if app_state.edit_mode and app_state.profile_entries:
             updated_profiles = {}
-            new_active_profile = active_profile
-            for old_name, entry in profile_entries.items():
+            new_active_profile = app_state.active_profile
+            for old_name, entry in app_state.profile_entries.items():
                 new_name = entry.text().strip()
                 if old_name == "SDE" or new_name == "SDE":
                     continue
                 if new_name and new_name != old_name:
-                    if new_name in data["profiles"]:
+                    if new_name in app_state.data["profiles"]:
                         show_critical_message("Fehler", f"Profilname '{new_name}' existiert bereits!")
                         return
-                    updated_profiles[new_name] = data["profiles"].pop(old_name)
-                    if active_profile == old_name:
+                    updated_profiles[new_name] = app_state.data["profiles"].pop(old_name)
+                    if app_state.active_profile == old_name:
                         new_active_profile = new_name
                 else:
-                    updated_profiles[old_name] = data["profiles"][old_name]
-            data["profiles"] = updated_profiles
-            data["profiles"]["SDE"] = load_sde_profile()
+                    updated_profiles[old_name] = app_state.data["profiles"][old_name]
+            app_state.data["profiles"] = updated_profiles
+            app_state.data["profiles"]["SDE"] = load_sde_profile()
             available_profiles = {**updated_profiles, "SDE": load_sde_profile()}
             if new_active_profile in available_profiles:
-                active_profile = new_active_profile
+                app_state.active_profile = new_active_profile
             else:
-                active_profile = list(available_profiles.keys())[0]
+                app_state.active_profile = list(available_profiles.keys())[0]
             if len(updated_profiles) > 11:
                 show_critical_message("Limit erreicht", "Maximal 10 Profile erlaubt!")
                 return
-            data["active_profile"] = active_profile
-        if active_profile != "SDE":
-            data["profiles"][active_profile]["titles"] = [entry.text() for entry in title_entries]
-            data["profiles"][active_profile]["texts"] = [entry.toHtml() if hasattr(entry, 'toHtml') else entry.text() for entry in text_entries]
-            data["profiles"][active_profile]["hotkeys"] = [entry.text() for entry in hotkey_entries]
-        profiles_to_save = {k: v for k, v in data["profiles"].items() if k != "SDE"}
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump({"profiles": profiles_to_save, "active_profile": data["active_profile"]}, f, indent=4)
+            app_state.data["active_profile"] = app_state.active_profile
+        if app_state.active_profile != "SDE":
+            app_state.data["profiles"][app_state.active_profile]["titles"] = [entry.text() for entry in app_state.title_entries]
+            app_state.data["profiles"][app_state.active_profile]["texts"] = [entry.toHtml() if hasattr(entry, 'toHtml') else entry.text() for entry in app_state.text_entries]
+            app_state.data["profiles"][app_state.active_profile]["hotkeys"] = [entry.text() for entry in app_state.hotkey_entries]
+        profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
+        debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": app_state.data["active_profile"]})
         fehlerhafte_hotkeys = register_hotkeys()
         reset_unsaved_changes()
         update_ui()
@@ -1031,12 +1068,10 @@ def save_data(stay_in_edit_mode=False):
     reset_unsaved_changes()
 
 def mark_unsaved_changes(event=None):
-    global unsaved_changes
-    unsaved_changes = True
+    app_state.unsaved_changes = True
 
 def reset_unsaved_changes():
-    global unsaved_changes
-    unsaved_changes = False
+    app_state.unsaved_changes = False
 
 def confirm_and_then(action_if_yes):
     if not has_field_changes():
@@ -1145,7 +1180,7 @@ def show_text_context_menu(pos, text_widget):
     else:
         insert_link_action = menu.addAction("Insert Hyperlink...")
         insert_link_action.triggered.connect(lambda: insert_hyperlink_at_cursor(text_widget))
-    if dark_mode:
+    if app_state.dark_mode:
         menu.setStyleSheet("""
             QMenu {
                 background-color: #2e2e2e;
@@ -1187,7 +1222,7 @@ def add_hyperlink_to_selection(text_widget, cursor):
         link_format = QtGui.QTextCharFormat()
         link_format.setAnchor(True)
         link_format.setAnchorHref(url.strip())
-        link_format.setForeground(QtGui.QColor("#0066cc" if not dark_mode else "#4da6ff"))
+        link_format.setForeground(QtGui.QColor("#0066cc" if not app_state.dark_mode else "#4da6ff"))
         link_format.setUnderlineStyle(QtGui.QTextCharFormat.SingleUnderline)
         cursor.mergeCharFormat(link_format)
         text_widget.setTextCursor(cursor)
@@ -1196,7 +1231,7 @@ def remove_hyperlink_from_selection(text_widget, cursor):
     normal_format = QtGui.QTextCharFormat()
     normal_format.setAnchor(False)
     normal_format.setAnchorHref("")
-    normal_format.setForeground(QtGui.QColor("white" if dark_mode else "black"))
+    normal_format.setForeground(QtGui.QColor("white" if app_state.dark_mode else "black"))
     normal_format.setUnderlineStyle(QtGui.QTextCharFormat.NoUnderline)
     cursor.mergeCharFormat(normal_format)
     text_widget.setTextCursor(cursor)
@@ -1218,27 +1253,25 @@ def insert_hyperlink_at_cursor(text_widget):
             link_format = QtGui.QTextCharFormat()
             link_format.setAnchor(True)
             link_format.setAnchorHref(url.strip())
-            link_format.setForeground(QtGui.QColor("#0066cc" if not dark_mode else "#4da6ff"))
+            link_format.setForeground(QtGui.QColor("#0066cc" if not app_state.dark_mode else "#4da6ff"))
             link_format.setUnderlineStyle(QtGui.QTextCharFormat.SingleUnderline)
             cursor.insertText(display_text.strip(), link_format)
             normal_format = QtGui.QTextCharFormat()
             normal_format.setAnchor(False)
-            normal_format.setForeground(QtGui.QColor("white" if dark_mode else "black"))
+            normal_format.setForeground(QtGui.QColor("white" if app_state.dark_mode else "black"))
             normal_format.setUnderlineStyle(QtGui.QTextCharFormat.NoUnderline)
             cursor.setCharFormat(normal_format)
             text_widget.setTextCursor(cursor)
 
 def update_ui():
-    global toolbar, entries_layout, active_profile, edit_mode, dark_mode, data
-    global title_entries, text_entries, hotkey_entries, profile_entries
-    title_entries = []
-    text_entries = []
-    hotkey_entries = []
-    profile_entries = {}
-    bg    = "#2e2e2e" if dark_mode else "#eeeeee"
-    fg    = "white"   if dark_mode else "black"
-    ebg   = "#3c3c3c" if dark_mode else "white"
-    bbg   = "#444"    if dark_mode else "#cccccc"
+    app_state.title_entries = []
+    app_state.text_entries = []
+    app_state.hotkey_entries = []
+    app_state.profile_entries = {}
+    bg    = "#2e2e2e" if app_state.dark_mode else "#eeeeee"
+    fg    = "white"   if app_state.dark_mode else "black"
+    ebg   = "#3c3c3c" if app_state.dark_mode else "white"
+    bbg   = "#444"    if app_state.dark_mode else "#cccccc"
     win.setStyleSheet(f"background:{bg};")
     toolbar.setStyleSheet(f"background:{bg}; border: none;")
     container.setStyleSheet(f"background:{bg};")
@@ -1250,8 +1283,8 @@ def update_ui():
         }}
     """)
     toolbar.clear()
-    profs = [p for p in data["profiles"] if p!="SDE"]
-    if not edit_mode and "SDE" in data["profiles"]:
+    profs = [p for p in app_state.data["profiles"] if p!="SDE"]
+    if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
         profs.append("SDE")
     for prof in profs:
         frame = QtWidgets.QWidget()
@@ -1259,33 +1292,33 @@ def update_ui():
         layout = QtWidgets.QHBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
-        if edit_mode and prof != "SDE":
+        if app_state.edit_mode and prof != "SDE":
             entry = QtWidgets.QLineEdit(prof)
             entry.setFixedWidth(80)
             entry.setStyleSheet(
                 f"background:{ebg}; color:{fg}; border-radius:5px; padding:4px;"
             )
-            profile_entries[prof] = entry
+            app_state.profile_entries[prof] = entry
             layout.addWidget(entry)
-            switch_btn = QtWidgets.QPushButton("🖊️" if prof == active_profile else "🖊️")
+            switch_btn = QtWidgets.QPushButton("🖊️" if prof == app_state.active_profile else "🖊️")
             switch_btn.setFixedWidth(28)
             switch_btn.setStyleSheet(
                 f"""
-                background:{'#4a90e2' if prof == active_profile else bbg}; 
+                background:{'#4a90e2' if prof == app_state.active_profile else bbg}; 
                 color:{fg}; 
                 border-radius:12px;
                 font-size: 14px;
                 """
             )
             switch_btn.setToolTip(f"Zu Profil '{prof}' wechseln")
-            switch_btn.clicked.connect(lambda _, p=prof: switch_profile(p))
+            switch_btn.clicked.connect(partial(switch_profile, prof))
             layout.addWidget(switch_btn)
             delete_btn = QtWidgets.QPushButton("❌")
             delete_btn.setFixedWidth(28)
             delete_btn.setStyleSheet(
                 f"background:{bbg}; color:{fg}; border-radius:12px;"
             )
-            delete_btn.clicked.connect(lambda _, p=prof: delete_profile(p))
+            delete_btn.clicked.connect(partial(delete_profile, prof))
             layout.addWidget(delete_btn)
         else:
             btn = QtWidgets.QPushButton(prof)
@@ -1293,7 +1326,7 @@ def update_ui():
                 f"""
                 QPushButton {{
                     background:{bbg}; color:{fg};
-                    font-weight:{'bold' if prof==active_profile else 'normal'};
+                    font-weight:{'bold' if prof==app_state.active_profile else 'normal'};
                     border-radius: 5px;
                     padding: 6px 16px;
                     margin-right: 4px;
@@ -1303,13 +1336,13 @@ def update_ui():
                 }}
                 """
             )
-            btn.clicked.connect(lambda _,p=prof: switch_profile(p))
+            btn.clicked.connect(partial(switch_profile, prof))
             layout.addWidget(btn)
         toolbar.addWidget(frame)
     spacer = QtWidgets.QWidget()
     spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     toolbar.addWidget(spacer)
-    if edit_mode:
+    if app_state.edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
         ap.setStyleSheet(
             f"""
@@ -1327,7 +1360,7 @@ def update_ui():
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
     for text, func, tooltip in [
-        ("🌙" if not dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
+        ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
         ("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten")
     ]:
         b = QtWidgets.QPushButton(text)
@@ -1371,26 +1404,26 @@ def update_ui():
     while entries_layout.count():
         w = entries_layout.takeAt(0).widget()
         if w: w.deleteLater()
-    prof_data = data["profiles"][active_profile]
+    prof_data = app_state.data["profiles"][app_state.active_profile]
     titles, texts, hks = prof_data["titles"], prof_data["texts"], prof_data["hotkeys"]
     max_t = 120
     max_h = 120
     for i, title in enumerate(titles):
-        if edit_mode:
+        if app_state.edit_mode:
             row = DragDropWidget(i)
         else:
             row = QtWidgets.QWidget()
         hl  = QtWidgets.QHBoxLayout(row)
         hl.setContentsMargins(8, 4, 8, 4)
         hl.setSpacing(12)
-        if edit_mode:
+        if app_state.edit_mode:
             drag_handle = QtWidgets.QLabel("☰")
             drag_handle.setFixedSize(20, 28)
             drag_handle.setStyleSheet(f"""
                 color: {fg}; 
                 background: {bbg}; 
                 padding: 2px 4px;
-                border: 1px solid {'#555' if dark_mode else '#ccc'};
+                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                 border-radius: 4px;
                 font-size: 14px;
                 text-align: center;
@@ -1400,15 +1433,17 @@ def update_ui():
             row.drag_index = i
             drag_handle.drag_index = i
             row.setAcceptDrops(True)
-            drag_handle.mousePressEvent = lambda event, idx=i: start_drag(event, idx, drag_handle)
+            drag_handle.mousePressEvent = partial(start_drag, idx=i, widget=drag_handle)
             hl.addWidget(drag_handle)
-        if edit_mode:
+        if app_state.edit_mode:
             et = QtWidgets.QLineEdit(title)
             et.setFixedWidth(max_t)
-            et.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
-            et.editingFinished.connect(lambda idx=i, w=et: prof_data['titles'].__setitem__(idx, w.text()))
+            et.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
+            def update_title(widget, index):
+                app_state.data["profiles"][app_state.active_profile]["titles"][index] = widget.text()
+            et.editingFinished.connect(partial(update_title, et, i))
             hl.addWidget(et)
-            title_entries.append(et)
+            app_state.title_entries.append(et)
         else:
             lt = QtWidgets.QLabel(title)
             lt.setFixedWidth(max_t)
@@ -1418,13 +1453,13 @@ def update_ui():
                 background: {ebg}; 
                 font-weight: bold; 
                 padding: 10px 12px;
-                border: 1px solid {'#555' if dark_mode else '#ccc'};
+                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                 border-radius: 6px;
                 font-size: 13px;
             """)
             lt.setAlignment(QtCore.Qt.AlignVCenter)
             hl.addWidget(lt)
-        if edit_mode:
+        if app_state.edit_mode:
             ex = QtWidgets.QTextEdit(texts[i])
             ex.setMaximumHeight(80)
             ex.setMinimumHeight(60)
@@ -1432,12 +1467,12 @@ def update_ui():
             ex.setAcceptRichText(True)
             ex.setHtml(texts[i])
             ex.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-            ex.customContextMenuRequested.connect(lambda pos, widget=ex: show_text_context_menu(pos, widget))
-            def make_text_handler(idx):
-                return lambda: prof_data['texts'].__setitem__(idx, ex.toHtml())
-            ex.textChanged.connect(make_text_handler(i))
+            ex.customContextMenuRequested.connect(partial(show_text_context_menu, widget=ex))
+            def update_text(widget, index):
+                app_state.data["profiles"][app_state.active_profile]["texts"][index] = widget.toHtml()
+            ex.textChanged.connect(partial(update_text, ex, i))
             hl.addWidget(ex, 1)
-            text_entries.append(ex)
+            app_state.text_entries.append(ex)
         else:
             text_btn = QtWidgets.QPushButton()
             text_btn.setStyleSheet(f"""
@@ -1446,16 +1481,16 @@ def update_ui():
                     color: {fg}; 
                     text-align: left; 
                     padding: 10px 12px;
-                    border: 1px solid {'#555' if dark_mode else '#ccc'};
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                     border-radius: 6px;
                     font-size: 13px;
                 }}
                 QPushButton:hover {{
-                    background: {'#4a4a4a' if dark_mode else '#f0f0f0'};
-                    border: 1px solid {'#666' if dark_mode else '#999'};
+                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
+                    border: 1px solid {'#666' if app_state.dark_mode else '#999'};
                 }}
                 QPushButton:pressed {{
-                    background: {'#555' if dark_mode else '#e0e0e0'};
+                    background: {'#555' if app_state.dark_mode else '#e0e0e0'};
                 }}
             """)
             text_btn.setFixedHeight(40)
@@ -1469,14 +1504,12 @@ def update_ui():
             else:
                 display_text = first_line if first_line else "(Leer)"
             text_btn.setText(display_text)
-            def make_copy_handler(idx):
-                return lambda: copy_text_to_clipboard(idx)
-            text_btn.clicked.connect(make_copy_handler(i))
+            text_btn.clicked.connect(partial(copy_text_to_clipboard, i))
             hl.addWidget(text_btn, 1)
-        if edit_mode:
+        if app_state.edit_mode:
             eh = QtWidgets.QLineEdit(hks[i])
             eh.setFixedWidth(max_h)
-            eh.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
+            eh.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
             def validate_and_set_hotkey(idx, widget):
                 hotkey = widget.text().strip().lower()
                 erlaubte_zeichen = "1234567890befhmpqvxz§'^"
@@ -1494,7 +1527,7 @@ def update_ui():
                         )
                         widget.setText(hks[idx])
                         return
-                    current_hotkeys = [entry.text().strip().lower() for j, entry in enumerate(hotkey_entries) if j != idx]
+                    current_hotkeys = [entry.text().strip().lower() for j, entry in enumerate(app_state.hotkey_entries) if j != idx]
                     if hotkey in current_hotkeys:
                         show_critical_message(
                             "Fehler", 
@@ -1502,15 +1535,15 @@ def update_ui():
                         )
                         widget.setText(hks[idx])
                         return
-                prof_data['hotkeys'][idx] = widget.text()
-            eh.editingFinished.connect(lambda idx=i, w=eh: validate_and_set_hotkey(idx, w))
+                app_state.data["profiles"][app_state.active_profile]["hotkeys"][idx] = widget.text()
+            eh.editingFinished.connect(partial(validate_and_set_hotkey, idx=i, widget=eh))
             hl.addWidget(eh)
-            hotkey_entries.append(eh)
+            app_state.hotkey_entries.append(eh)
             delete_btn = QtWidgets.QPushButton("❌")
             delete_btn.setFixedSize(20, 20)
             delete_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {'#4a4a4a' if dark_mode else '#f0f0f0'}; 
+                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'}; 
                     color: white; 
                     border: 1px solid #b71c1c;
                     border-radius: 3px;
@@ -1518,7 +1551,7 @@ def update_ui():
                 }}
                 QPushButton:hover {{ background: #f44336; }}
             """)
-            delete_btn.clicked.connect(lambda _, idx=i: delete_entry(idx))
+            delete_btn.clicked.connect(partial(delete_entry, idx=i))
             delete_btn.setToolTip("Eintrag löschen")
             hl.addWidget(delete_btn)
         else:
@@ -1529,7 +1562,7 @@ def update_ui():
                 color: {fg}; 
                 background: {ebg}; 
                 padding: 10px 12px;
-                border: 1px solid {'#555' if dark_mode else '#ccc'};
+                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                 border-radius: 6px;
                 font-size: 13px;
                 font-family: 'Consolas', 'Monaco', monospace;
@@ -1539,7 +1572,7 @@ def update_ui():
 
         entries_layout.addWidget(row)
 
-    if edit_mode:
+    if app_state.edit_mode:
         bw = QtWidgets.QWidget()
         bl = QtWidgets.QHBoxLayout(bw)
         bl.setContentsMargins(0,0,0,0)
@@ -1580,7 +1613,7 @@ def show_help_dialog():
 #region darkmode
 
 def apply_dark_mode_to_messagebox(msg):
-    if dark_mode:
+    if app_state.dark_mode:
         msg.setStyleSheet("""
             QMessageBox {
                 background-color: #2e2e2e;
@@ -1667,8 +1700,7 @@ def show_information_message(title, text, parent=None):
     msg.exec_()
 
 def toggle_dark_mode():
-    global dark_mode
-    dark_mode = not dark_mode
+    app_state.dark_mode = not app_state.dark_mode
     update_ui()
     save_window_position()  
 
