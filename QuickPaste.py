@@ -183,6 +183,41 @@ def update_profile_buttons():
         else:
             btn.setStyleSheet("")
 
+def validate_profile_data(titles, texts, hotkeys):
+    """Validate and synchronize profile data arrays"""
+    # Ensure all arrays have the same length
+    max_length = max(len(titles), len(texts), len(hotkeys))
+    
+    # Pad shorter arrays with default values
+    titles = titles + [f"Titel {i+1}" for i in range(len(titles), max_length)]
+    texts = texts + [f"Text {i+1}" for i in range(len(texts), max_length)]
+    hotkeys = hotkeys + [f"ctrl+shift+{i+1}" for i in range(len(hotkeys), max_length)]
+    
+    # Validate hotkey format
+    erlaubte_zeichen = set("1234567890befhmpqvxz")
+    validated_hotkeys = []
+    
+    for i, hotkey in enumerate(hotkeys):
+        hotkey = hotkey.strip().lower()
+        parts = hotkey.split("+")
+        
+        if (len(parts) != 3 or 
+            parts[0] != "ctrl" or 
+            parts[1] != "shift" or 
+            parts[2] not in erlaubte_zeichen):
+            # Generate a valid hotkey
+            for char in erlaubte_zeichen:
+                test_hotkey = f"ctrl+shift+{char}"
+                if test_hotkey not in validated_hotkeys:
+                    validated_hotkeys.append(test_hotkey)
+                    break
+            else:
+                validated_hotkeys.append(f"ctrl+shift+{i+1}")
+        else:
+            validated_hotkeys.append(hotkey)
+    
+    return titles, texts, validated_hotkeys
+
 def switch_profile(profile_name):
     global active_profile
     if profile_name == active_profile:
@@ -191,11 +226,17 @@ def switch_profile(profile_name):
         current_titles = [entry.text() for entry in title_entries]
         current_texts = []
         for entry in text_entries:
-            if hasattr(entry, 'toPlainText'):
-                current_texts.append(entry.toPlainText())
+            if hasattr(entry, 'toHtml'):
+                current_texts.append(entry.toHtml())
             else:
                 current_texts.append(entry.text())
         current_hks = [entry.text() for entry in hotkey_entries]
+        
+        # Validate and synchronize data before saving
+        validated_titles, validated_texts, validated_hotkeys = validate_profile_data(
+            current_titles, current_texts, current_hks
+        )
+        
         stored_data = data["profiles"][active_profile]
         stored_plain_texts = []
         for stored_text in stored_data["texts"]:
@@ -205,9 +246,11 @@ def switch_profile(profile_name):
                 stored_plain_texts.append(doc.toPlainText())
             else:
                 stored_plain_texts.append(stored_text)
-        has_changes = (current_titles != stored_data["titles"] or 
-                      current_texts != stored_plain_texts or 
-                      current_hks != stored_data["hotkeys"])
+        
+        has_changes = (validated_titles != stored_data["titles"] or 
+                      validated_texts != stored_data["texts"] or 
+                      validated_hotkeys != stored_data["hotkeys"])
+        
         if has_changes:
             resp = show_question_message(
                 "Ungesicherte Änderungen",
@@ -217,9 +260,11 @@ def switch_profile(profile_name):
             if resp == QtWidgets.QMessageBox.Cancel:
                 return
             if resp == QtWidgets.QMessageBox.Yes:
-                data["profiles"][active_profile]["titles"] = current_titles
-                data["profiles"][active_profile]["texts"] = [entry.toHtml() if hasattr(entry, 'toHtml') else entry.text() for entry in text_entries]
-                data["profiles"][active_profile]["hotkeys"] = current_hks
+                # Save validated data
+                data["profiles"][active_profile]["titles"] = validated_titles
+                data["profiles"][active_profile]["texts"] = validated_texts
+                data["profiles"][active_profile]["hotkeys"] = validated_hotkeys
+                
                 profiles_to_save = {k: v for k, v in data["profiles"].items() if k != "SDE"}
                 with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                     json.dump({"profiles": profiles_to_save, "active_profile": profile_name}, f, indent=4)
@@ -289,25 +334,58 @@ def make_profile_switcher(profile_name):
 
 #region insert text / hotkeys
 
+class ClipboardManager:
+    def __init__(self):
+        self.clipboard_opened = False
+        
+    def __enter__(self):
+        for open_attempt in range(5):
+            try:
+                win32clipboard.OpenClipboard()
+                self.clipboard_opened = True
+                break
+            except:
+                time.sleep(0.01)
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.clipboard_opened:
+            try:
+                win32clipboard.CloseClipboard()
+            except:
+                pass
+                
+    def is_open(self):
+        return self.clipboard_opened
+        
+    def empty(self):
+        if self.clipboard_opened:
+            win32clipboard.EmptyClipboard()
+            
+    def set_text(self, text, format_type):
+        if self.clipboard_opened:
+            win32clipboard.SetClipboardText(text, format_type)
+            
+    def set_data(self, format_type, data):
+        if self.clipboard_opened:
+            win32clipboard.SetClipboardData(format_type, data)
+
 def set_clipboard_html(html_content, plain_text_content):
     max_retries = 3
     retry_delay = 0.02
+    
     for attempt in range(max_retries):
         try:
-            clipboard_opened = False
-            for open_attempt in range(5):
-                try:
-                    win32clipboard.OpenClipboard()
-                    clipboard_opened = True
-                    break
-                except:
-                    time.sleep(0.01)
-            if not clipboard_opened:
-                logging.warning(f"Failed to open clipboard after 5 attempts")
-                return False
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardText(plain_text_content, win32con.CF_TEXT)
-            html_header = """Version:0.9
+            # Use context manager to ensure clipboard is always closed
+            with ClipboardManager() as clipboard:
+                if not clipboard.is_open():
+                    logging.warning(f"Failed to open clipboard after 5 attempts")
+                    return False
+                
+                clipboard.empty()
+                clipboard.set_text(plain_text_content, win32con.CF_TEXT)
+                
+                html_header = """Version:0.9
 StartHTML:0000000105
 EndHTML:{:010d}
 StartFragment:0000000141
@@ -317,30 +395,28 @@ EndFragment:{:010d}
 <!--StartFragment-->{}<!--EndFragment-->
 </body>
 </html>""".format(len(html_content) + 175, len(html_content) + 141, html_content)
-            cf_html = win32clipboard.RegisterClipboardFormat("HTML Format")
-            win32clipboard.SetClipboardData(cf_html, html_header.encode('utf-8'))
-            win32clipboard.CloseClipboard()
-            time.sleep(0.01)
-            try:
-                win32clipboard.OpenClipboard()
-                html_available = win32clipboard.IsClipboardFormatAvailable(cf_html)
-                text_available = win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT)
-                win32clipboard.CloseClipboard()
-                if html_available and text_available:
-                    logging.info(f"Successfully set clipboard with HTML content (attempt {attempt + 1}): {html_content[:50]}...")
-                    return True
-                else:
-                    logging.warning(f"Clipboard verification failed (attempt {attempt + 1}): HTML={html_available}, Text={text_available}")
-            except Exception as verify_error:
-                logging.warning(f"Clipboard verification failed (attempt {attempt + 1}): {verify_error}")
+                
+                cf_html = win32clipboard.RegisterClipboardFormat("HTML Format")
+                clipboard.set_data(cf_html, html_header.encode('utf-8'))
+                
+                # Verify clipboard content
+                time.sleep(0.01)
+                with ClipboardManager() as verify_clipboard:
+                    if verify_clipboard.is_open():
+                        html_available = win32clipboard.IsClipboardFormatAvailable(cf_html)
+                        text_available = win32clipboard.IsClipboardFormatAvailable(win32con.CF_TEXT)
+                        if html_available and text_available:
+                            logging.info(f"Successfully set clipboard with HTML content (attempt {attempt + 1}): {html_content[:50]}...")
+                            return True
+                        else:
+                            logging.warning(f"Clipboard verification failed (attempt {attempt + 1}): HTML={html_available}, Text={text_available}")
+                            
         except Exception as e:
             logging.warning(f"Error setting clipboard (attempt {attempt + 1}): {e}")
-            try:
-                win32clipboard.CloseClipboard()
-            except:
-                pass
+            
         if attempt < max_retries - 1:
             time.sleep(retry_delay)
+    
     logging.error(f"Failed to set clipboard after {max_retries} attempts")
     return False
 
@@ -484,6 +560,31 @@ def copy_text_to_clipboard(index):
     if hasattr(win, 'statusBar'):
         win.statusBar().showMessage("Text in Zwischenablage kopiert!", 2000)
 
+def cleanup_hotkeys():
+    """Properly cleanup all registered hotkeys and event filters"""
+    global registered_hotkey_ids, id_to_index, hotkey_filter_instance
+    
+    # Unregister all hotkeys
+    if 'registered_hotkey_ids' in globals():
+        for hotkey_id in registered_hotkey_ids:
+            try:
+                ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
+            except Exception as e:
+                logging.warning(f"Failed to unregister hotkey {hotkey_id}: {e}")
+        registered_hotkey_ids.clear()
+    
+    # Clear index mapping
+    if 'id_to_index' in globals():
+        id_to_index.clear()
+    
+    # Remove native event filter
+    if 'hotkey_filter_instance' in globals() and hotkey_filter_instance is not None:
+        try:
+            app.removeNativeEventFilter(hotkey_filter_instance)
+            hotkey_filter_instance = None
+        except Exception as e:
+            logging.warning(f"Failed to remove native event filter: {e}")
+
 def register_hotkeys():
     """
     Registriert globale Hotkeys via WinAPI (RegisterHotKey) und verarbeitet sie
@@ -515,6 +616,9 @@ def register_hotkeys():
         # alles andere (Sonderzeichen wie §,'^) hier nicht unterstützen
         return None
 
+    # --- Always cleanup first to prevent memory leaks ---
+    cleanup_hotkeys()
+    
     # --- Bestehende Registrierungen aufräumen (falls schon welche da sind) ---
     # Wir benutzen eigene Strukturen statt 'registered_hotkey_refs' (keyboard)
     global registered_hotkey_ids, id_to_index, hotkey_filter_instance
@@ -522,15 +626,6 @@ def register_hotkeys():
         registered_hotkey_ids = []
     if "id_to_index" not in globals():
         id_to_index = {}
-
-    # Deregistrieren
-    for _id in registered_hotkey_ids:
-        try:
-            user32.UnregisterHotKey(None, _id)
-        except Exception:
-            pass
-    registered_hotkey_ids = []
-    id_to_index = {}
 
     # --- Hotkeys aus aktivem Profil einlesen & validieren ---
     erlaubte_zeichen = set("1234567890befhmpqvxz")  # wie bisher, aber ohne Sonderzeichen
@@ -623,6 +718,9 @@ def register_hotkeys():
 
         hotkey_filter_instance = _HotkeyFilter()
         app.installNativeEventFilter(hotkey_filter_instance)
+        
+        # Add cleanup to application exit
+        app.aboutToQuit.connect(cleanup_hotkeys)
 
     return fehler
 
