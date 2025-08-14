@@ -343,6 +343,8 @@ def switch_profile(profile_name):
     debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
     update_profile_buttons()
     update_ui()
+    register_hotkeys()
+    refresh_tray()
 
 def add_new_profile():
     if len(app_state.data["profiles"]) >= 11:
