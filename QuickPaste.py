@@ -280,6 +280,7 @@ def validate_profile_data(titles, texts, hotkeys):
 def switch_profile(profile_name):
     if profile_name == app_state.active_profile:
         return
+    was_visible = win.isVisible()
     if app_state.edit_mode and app_state.title_entries and app_state.text_entries and app_state.hotkey_entries:
         current_titles = [entry.text() for entry in app_state.title_entries]
         current_texts = []
@@ -342,9 +343,13 @@ def switch_profile(profile_name):
     profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
     debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
     update_profile_buttons()
-    update_ui()
+    if was_visible:
+        update_ui()
     register_hotkeys()
     refresh_tray()
+    if not was_visible:
+        win.hide()
+
 
 def add_new_profile():
     if len(app_state.data["profiles"]) >= 11:
