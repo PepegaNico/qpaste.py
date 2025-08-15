@@ -791,6 +791,7 @@ def create_tray_icon():
             logging.warning(f"Failed to cleanup tray: {e}")
         app_state.tray = None
     app_state.tray = QSystemTrayIcon(QtGui.QIcon(ICON_PATH), win)
+    app_state.tray.setToolTip(f"Aktives Profil: {app_state.active_profile}")
     menu = QMenu()
     for prof in app_state.data["profiles"]:
         label = f"✓ {prof}" if prof == app_state.active_profile else f"  {prof}"
