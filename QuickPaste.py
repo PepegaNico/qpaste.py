@@ -202,7 +202,7 @@ def save_profile_names():
         app_state.active_profile = next(iter(app_state.data["profiles"]))
     app_state.data["active_profile"] = app_state.active_profile
     save_data()
-    update_ui()
+    schedule_update_ui()
 
 def update_profile_buttons():
     for prof, btn in app_state.profile_buttons.items():
@@ -303,7 +303,7 @@ def switch_profile(profile_name):
     debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
     update_profile_buttons()
     if was_visible:
-        update_ui()
+        schedule_update_ui()
     register_hotkeys()
     refresh_tray()
     if not was_visible:
@@ -325,7 +325,7 @@ def add_new_profile():
     }
     app_state.active_profile = name
     app_state.data["active_profile"] = name
-    update_ui()
+    schedule_update_ui()
 
 def delete_profile(profile_name):
     if profile_name == "SDE":
@@ -344,7 +344,7 @@ def delete_profile(profile_name):
     if app_state.active_profile == profile_name:
         app_state.active_profile = next(iter(app_state.data["profiles"]))
         app_state.data["active_profile"] = app_state.active_profile
-    update_ui()
+    schedule_update_ui()
     save_data()
 
 def make_profile_switcher(profile_name):
@@ -867,7 +867,7 @@ def move_entry(index, direction):
     elif direction == "down" and index < len(titles) - 1:
         titles[index], titles[index+1] = titles[index+1], titles[index]
         texts[index], texts[index+1] = texts[index+1], texts[index]
-    update_ui() 
+    schedule_update_ui() 
 
 def add_new_entry():
     if "titles" not in app_state.data["profiles"][app_state.active_profile]:
@@ -889,7 +889,7 @@ def add_new_entry():
     app_state.data["profiles"][app_state.active_profile]["titles"].append("Neuer Eintrag")
     app_state.data["profiles"][app_state.active_profile]["texts"].append("Neuer Text")
     app_state.data["profiles"][app_state.active_profile]["hotkeys"].append(neuer_hotkey)
-    update_ui()
+    schedule_update_ui()
 
 def delete_entry(index):
     if "titles" not in app_state.data["profiles"][app_state.active_profile]:
@@ -904,7 +904,7 @@ def delete_entry(index):
     del app_state.data["profiles"][app_state.active_profile]["titles"][index]
     del app_state.data["profiles"][app_state.active_profile]["texts"][index]
     del app_state.data["profiles"][app_state.active_profile]["hotkeys"][index]
-    update_ui() 
+    schedule_update_ui() 
     register_hotkeys() 
 
 def move_entry_to(old_index, new_index):
@@ -914,7 +914,7 @@ def move_entry_to(old_index, new_index):
     text = texts.pop(old_index)
     titles.insert(new_index, title)
     texts.insert(new_index, text)
-    update_ui()
+    schedule_update_ui()
 
 def on_drag_start(event, index):
     global dragged_index
@@ -947,7 +947,7 @@ def on_drag_release(event):
         if target_index is not None and target_index != dragged_index:
             swap_entries(dragged_index, target_index)
     dragged_index = None
-    update_ui()
+    schedule_update_ui()
 
 def swap_entries(i, j):
     titles = app_state.data["profiles"][app_state.active_profile]["titles"]
@@ -972,14 +972,14 @@ def toggle_edit_mode():
             else:
                 reset_unsaved_changes()
         app_state.edit_mode = False
-        update_ui()
+        schedule_update_ui()
         return
     is_sde_only = len(app_state.data["profiles"]) == 1 and "SDE" in app_state.data["profiles"]
     if app_state.active_profile == "SDE" and not is_sde_only:
         show_information_message("Nicht editierbar", "Das SDE-Profil kann nicht bearbeitet werden.")
         return
     app_state.edit_mode = True
-    update_ui()
+    schedule_update_ui()
 #endregion
 
 #region save_data
@@ -1060,6 +1060,13 @@ active_profile = data.get("active_profile", list(data["profiles"].keys())[0])
 #region Hauptfenster
 
 app = QtWidgets.QApplication(sys.argv)
+try:
+    from quickpaste.health import check_clipboard_access
+    if not check_clipboard_access():
+        logging.warning("Clipboard not accessible at startup")
+except Exception:
+    # Health check is best-effort
+    pass
 if sys.platform.startswith("win"):
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuickPaste")
 win = QtWidgets.QMainWindow()
@@ -1224,6 +1231,20 @@ def insert_hyperlink_at_cursor(text_widget):
             normal_format.setUnderlineStyle(QtGui.QTextCharFormat.NoUnderline)
             cursor.setCharFormat(normal_format)
             text_widget.setTextCursor(cursor)
+
+_ui_update_pending = False
+
+def schedule_update_ui(delay_ms: int = 30):
+    global _ui_update_pending
+    if _ui_update_pending:
+        return
+    _ui_update_pending = True
+    QtCore.QTimer.singleShot(delay_ms, _run_update_ui)
+
+def _run_update_ui():
+    global _ui_update_pending
+    _ui_update_pending = False
+    update_ui()
 
 def update_ui():
     app_state.title_entries = []
