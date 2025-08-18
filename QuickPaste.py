@@ -41,6 +41,7 @@ class QuickPasteState:
         self.registered_hotkey_ids = []
         self.id_to_index = {}
         self.hotkey_filter_instance = None
+        self.health_clipboard_ok = True
 
 # Global application state
 app_state = QuickPasteState()
@@ -1062,7 +1063,8 @@ active_profile = data.get("active_profile", list(data["profiles"].keys())[0])
 app = QtWidgets.QApplication(sys.argv)
 try:
     from quickpaste.health import check_clipboard_access
-    if not check_clipboard_access():
+    app_state.health_clipboard_ok = check_clipboard_access()
+    if not app_state.health_clipboard_ok:
         logging.warning("Clipboard not accessible at startup")
 except Exception:
     # Health check is best-effort
@@ -1265,6 +1267,11 @@ def update_ui():
             border-top: 1px solid #666;
         }}
     """)
+    # Health indicator
+    status_text = "Bereit"
+    if not getattr(app_state, 'health_clipboard_ok', True):
+        status_text = "Warnung: Zwischenablage nicht erreichbar"
+    win.statusBar().showMessage(status_text)
     toolbar.clear()
     profs = [p for p in app_state.data["profiles"] if p!="SDE"]
     if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
