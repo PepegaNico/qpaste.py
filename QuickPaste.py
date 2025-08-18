@@ -41,42 +41,12 @@ class QuickPasteState:
         self.registered_hotkey_ids = []
         self.id_to_index = {}
         self.hotkey_filter_instance = None
+        self.health_clipboard_ok = True
 
 # Global application state
 app_state = QuickPasteState()
 
-class DebouncedSaver:
-    """Debounced file saving to prevent excessive writes"""
-    def __init__(self, delay_ms=1000):
-        self.timer = QtCore.QTimer()
-        self.timer.setSingleShot(True)
-        self.timer.timeout.connect(self._save)
-        self.pending_data = None
-    
-    def schedule_save(self, data):
-        self.pending_data = data
-        self.timer.start()
-    
-    def _save(self):
-        if self.pending_data:
-            save_data_atomic(self.pending_data, CONFIG_FILE)
-
-def save_data_atomic(data, filename):
-    """Atomic file write to prevent corruption"""
-    temp_file = tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8')
-    try:
-        json.dump(data, temp_file, indent=4)
-        temp_file.close()
-        shutil.move(temp_file.name, filename)
-    except Exception as e:
-        try:
-            os.unlink(temp_file.name)
-        except (OSError, IOError):
-            pass
-        raise e
-
-# Initialize debounced saver
-debounced_saver = DebouncedSaver()
+from quickpaste.storage import DebouncedSaver, save_data_atomic, debounced_saver
 
 class ClipboardWorker(QThread):
     """Non-blocking clipboard operations"""
@@ -233,7 +203,7 @@ def save_profile_names():
         app_state.active_profile = next(iter(app_state.data["profiles"]))
     app_state.data["active_profile"] = app_state.active_profile
     save_data()
-    update_ui()
+    schedule_update_ui()
 
 def update_profile_buttons():
     for prof, btn in app_state.profile_buttons.items():
@@ -253,25 +223,15 @@ def validate_profile_data(titles, texts, hotkeys):
     hotkeys = hotkeys + [f"ctrl+shift+{i+1}" for i in range(len(hotkeys), max_length)]
     
     # Validate hotkey format
-    erlaubte_zeichen = set("1234567890befhmpqvxz")
+    from quickpaste.validators import HotkeyValidator
+    erlaubte_zeichen = set(HotkeyValidator.ALLOWED_CHARS)
     validated_hotkeys = []
     
     for i, hotkey in enumerate(hotkeys):
-        hotkey = hotkey.strip().lower()
-        parts = hotkey.split("+")
-        
-        if (len(parts) != 3 or 
-            parts[0] != "ctrl" or 
-            parts[1] != "shift" or 
-            parts[2] not in erlaubte_zeichen):
-            # Generate a valid hotkey
-            for char in erlaubte_zeichen:
-                test_hotkey = f"ctrl+shift+{char}"
-                if test_hotkey not in validated_hotkeys:
-                    validated_hotkeys.append(test_hotkey)
-                    break
-            else:
-                validated_hotkeys.append(f"ctrl+shift+{i+1}")
+        hotkey = HotkeyValidator.normalize(hotkey)
+        if not HotkeyValidator.is_valid(hotkey):
+            next_key = HotkeyValidator.next_available(set(validated_hotkeys))
+            validated_hotkeys.append(next_key)
         else:
             validated_hotkeys.append(hotkey)
     
@@ -344,7 +304,7 @@ def switch_profile(profile_name):
     debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
     update_profile_buttons()
     if was_visible:
-        update_ui()
+        schedule_update_ui()
     register_hotkeys()
     refresh_tray()
     if not was_visible:
@@ -366,7 +326,7 @@ def add_new_profile():
     }
     app_state.active_profile = name
     app_state.data["active_profile"] = name
-    update_ui()
+    schedule_update_ui()
 
 def delete_profile(profile_name):
     if profile_name == "SDE":
@@ -385,7 +345,7 @@ def delete_profile(profile_name):
     if app_state.active_profile == profile_name:
         app_state.active_profile = next(iter(app_state.data["profiles"]))
         app_state.data["active_profile"] = app_state.active_profile
-    update_ui()
+    schedule_update_ui()
     save_data()
 
 def make_profile_switcher(profile_name):
@@ -681,25 +641,20 @@ def register_hotkeys():
     # Wir benutzen eigene Strukturen statt 'registered_hotkey_refs' (keyboard)
 
     # --- Hotkeys aus aktivem Profil einlesen & validieren ---
-    erlaubte_zeichen = set("1234567890befhmpqvxz")  # wie bisher, aber ohne Sonderzeichen
+    from quickpaste.validators import HotkeyValidator
+    erlaubte_zeichen = set(HotkeyValidator.ALLOWED_CHARS)  # zentrale Definition
     belegte = set()
     fehler = False
     hotkeys = app_state.data["profiles"].setdefault(app_state.active_profile, {}).setdefault("hotkeys", [])
 
     next_id = 1
     for i, hot in enumerate(hotkeys):
-        hot = (hot or "").strip().lower()
+        hot = HotkeyValidator.normalize(hot or "")
         if not hot:
             continue
 
         parts = hot.split("+")
-        # Wichtig: wir bleiben vorerst bei deinem bisherigen Schema 'ctrl+shift+X'
-        if (
-            len(parts) != 3
-            or parts[0] != "ctrl"
-            or parts[1] != "shift"
-            or parts[2] not in erlaubte_zeichen
-        ):
+        if not HotkeyValidator.is_valid(hot):
             show_critical_message(
                 "Fehler",
                 f"Ungültiger Hotkey \"{hotkeys[i]}\" für Eintrag {i+1}.\n"
@@ -737,6 +692,8 @@ def register_hotkeys():
         next_id += 1
 
     logging.info(f"Registered {len(app_state.registered_hotkey_ids)} hotkeys for profile '{app_state.active_profile}'")
+    # Update health state for status bar
+    app_state.health_hotkeys_ok = len(app_state.registered_hotkey_ids) > 0 and not fehler
 
     # --- NativeEventFilter einmalig installieren, um WM_HOTKEY zu empfangen ---
     # Wir definieren den Filter lokal und installieren ihn nur einmal.
@@ -791,7 +748,13 @@ def create_tray_icon():
             logging.warning(f"Failed to cleanup tray: {e}")
         app_state.tray = None
     app_state.tray = QSystemTrayIcon(QtGui.QIcon(ICON_PATH), win)
-    app_state.tray.setToolTip(f"Aktives Profil: {app_state.active_profile}")
+    # Build tray tooltip with health info
+    health_parts = [f"Profil: {app_state.active_profile}"]
+    if not getattr(app_state, 'health_clipboard_ok', True):
+        health_parts.append("Clipboard: Problem")
+    if not getattr(app_state, 'health_hotkeys_ok', True):
+        health_parts.append("Hotkeys: Problem")
+    app_state.tray.setToolTip(" | ".join(health_parts))
     menu = QMenu()
     for prof in app_state.data["profiles"]:
         label = f"✓ {prof}" if prof == app_state.active_profile else f"  {prof}"
@@ -806,6 +769,17 @@ def create_tray_icon():
     act_quit.triggered.connect(lambda: (save_window_position(), app.quit()))
     menu.addAction(act_quit)
     app_state.tray.setContextMenu(menu)
+    # Update tooltip reactively when switching profiles or registering hotkeys
+    def _refresh_tray_tooltip():
+        parts = [f"Profil: {app_state.active_profile}"]
+        if not getattr(app_state, 'health_clipboard_ok', True):
+            parts.append("Clipboard: Problem")
+        if not getattr(app_state, 'health_hotkeys_ok', True):
+            parts.append("Hotkeys: Problem")
+        app_state.tray.setToolTip(" | ".join(parts))
+    # Hook tooltip refresh to relevant events
+    app.installEventFilter(win)
+    _refresh_tray_tooltip()
     app_state.tray.activated.connect(
         lambda reason:
             (win.show(), win.raise_(), win.activateWindow()) 
@@ -913,7 +887,7 @@ def move_entry(index, direction):
     elif direction == "down" and index < len(titles) - 1:
         titles[index], titles[index+1] = titles[index+1], titles[index]
         texts[index], texts[index+1] = texts[index+1], texts[index]
-    update_ui() 
+    schedule_update_ui() 
 
 def add_new_entry():
     if "titles" not in app_state.data["profiles"][app_state.active_profile]:
@@ -935,7 +909,7 @@ def add_new_entry():
     app_state.data["profiles"][app_state.active_profile]["titles"].append("Neuer Eintrag")
     app_state.data["profiles"][app_state.active_profile]["texts"].append("Neuer Text")
     app_state.data["profiles"][app_state.active_profile]["hotkeys"].append(neuer_hotkey)
-    update_ui()
+    schedule_update_ui()
 
 def delete_entry(index):
     if "titles" not in app_state.data["profiles"][app_state.active_profile]:
@@ -950,7 +924,7 @@ def delete_entry(index):
     del app_state.data["profiles"][app_state.active_profile]["titles"][index]
     del app_state.data["profiles"][app_state.active_profile]["texts"][index]
     del app_state.data["profiles"][app_state.active_profile]["hotkeys"][index]
-    update_ui() 
+    schedule_update_ui() 
     register_hotkeys() 
 
 def move_entry_to(old_index, new_index):
@@ -960,7 +934,7 @@ def move_entry_to(old_index, new_index):
     text = texts.pop(old_index)
     titles.insert(new_index, title)
     texts.insert(new_index, text)
-    update_ui()
+    schedule_update_ui()
 
 def on_drag_start(event, index):
     global dragged_index
@@ -993,7 +967,7 @@ def on_drag_release(event):
         if target_index is not None and target_index != dragged_index:
             swap_entries(dragged_index, target_index)
     dragged_index = None
-    update_ui()
+    schedule_update_ui()
 
 def swap_entries(i, j):
     titles = app_state.data["profiles"][app_state.active_profile]["titles"]
@@ -1018,14 +992,14 @@ def toggle_edit_mode():
             else:
                 reset_unsaved_changes()
         app_state.edit_mode = False
-        update_ui()
+        schedule_update_ui()
         return
     is_sde_only = len(app_state.data["profiles"]) == 1 and "SDE" in app_state.data["profiles"]
     if app_state.active_profile == "SDE" and not is_sde_only:
         show_information_message("Nicht editierbar", "Das SDE-Profil kann nicht bearbeitet werden.")
         return
     app_state.edit_mode = True
-    update_ui()
+    schedule_update_ui()
 #endregion
 
 #region save_data
@@ -1064,7 +1038,7 @@ def save_data(stay_in_edit_mode=False):
             app_state.data["profiles"][app_state.active_profile]["texts"] = [entry.toHtml() if hasattr(entry, 'toHtml') else entry.text() for entry in app_state.text_entries]
             app_state.data["profiles"][app_state.active_profile]["hotkeys"] = [entry.text() for entry in app_state.hotkey_entries]
         profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
-        debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": app_state.data["active_profile"]})
+        debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": app_state.data["active_profile"]}, CONFIG_FILE)
         fehlerhafte_hotkeys = register_hotkeys()
         reset_unsaved_changes()
         update_ui()
@@ -1106,6 +1080,14 @@ active_profile = data.get("active_profile", list(data["profiles"].keys())[0])
 #region Hauptfenster
 
 app = QtWidgets.QApplication(sys.argv)
+try:
+    from quickpaste.health import check_clipboard_access
+    app_state.health_clipboard_ok = check_clipboard_access()
+    if not app_state.health_clipboard_ok:
+        logging.warning("Clipboard not accessible at startup")
+except Exception:
+    # Health check is best-effort
+    pass
 if sys.platform.startswith("win"):
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuickPaste")
 win = QtWidgets.QMainWindow()
@@ -1271,6 +1253,20 @@ def insert_hyperlink_at_cursor(text_widget):
             cursor.setCharFormat(normal_format)
             text_widget.setTextCursor(cursor)
 
+_ui_update_pending = False
+
+def schedule_update_ui(delay_ms: int = 30):
+    global _ui_update_pending
+    if _ui_update_pending:
+        return
+    _ui_update_pending = True
+    QtCore.QTimer.singleShot(delay_ms, _run_update_ui)
+
+def _run_update_ui():
+    global _ui_update_pending
+    _ui_update_pending = False
+    update_ui()
+
 def update_ui():
     app_state.title_entries = []
     app_state.text_entries = []
@@ -1290,6 +1286,14 @@ def update_ui():
             border-top: 1px solid #666;
         }}
     """)
+    # Health indicator
+    status_bits = []
+    if not getattr(app_state, 'health_clipboard_ok', True):
+        status_bits.append("Zwischenablage: Problem")
+    if not getattr(app_state, 'health_hotkeys_ok', True):
+        status_bits.append("Hotkeys: Problem")
+    status_text = "Bereit" if not status_bits else " | ".join(status_bits)
+    win.statusBar().showMessage(status_text)
     toolbar.clear()
     profs = [p for p in app_state.data["profiles"] if p!="SDE"]
     if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
@@ -1519,31 +1523,29 @@ def update_ui():
             eh.setFixedWidth(max_h)
             eh.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
             def validate_and_set_hotkey(idx, widget):
-                hotkey = widget.text().strip().lower()
-                erlaubte_zeichen = "1234567890befhmpqvxz§'^"
+                from quickpaste.validators import HotkeyValidator
+                erlaubte_zeichen = ''.join(HotkeyValidator.ALLOWED_CHARS)
+                hotkey_raw = widget.text()
+                hotkey = HotkeyValidator.normalize(hotkey_raw)
                 if hotkey:
-                    parts = hotkey.split("+")
-                    if (len(parts) != 3 or 
-                        parts[0] != "ctrl" or 
-                        parts[1] != "shift" or 
-                        parts[2] not in erlaubte_zeichen):
+                    if not HotkeyValidator.is_valid(hotkey):
                         show_critical_message(
                             "Fehler", 
-                            f"Ungültiger Hotkey \"{widget.text()}\" für Eintrag {idx+1}.\n"
+                            f"Ungültiger Hotkey \"{hotkey_raw}\" für Eintrag {idx+1}.\n"
                             f"Erlaubte Zeichen: {erlaubte_zeichen}\n"
                             f"Format: ctrl+shift+[zeichen]"
                         )
                         widget.setText(hks[idx])
                         return
-                    current_hotkeys = [entry.text().strip().lower() for j, entry in enumerate(app_state.hotkey_entries) if j != idx]
+                    current_hotkeys = [HotkeyValidator.normalize(entry.text()) for j, entry in enumerate(app_state.hotkey_entries) if j != idx]
                     if hotkey in current_hotkeys:
                         show_critical_message(
                             "Fehler", 
-                            f"Hotkey \"{widget.text()}\" wird bereits in diesem Profil verwendet!"
+                            f"Hotkey \"{hotkey_raw}\" wird bereits in diesem Profil verwendet!"
                         )
                         widget.setText(hks[idx])
                         return
-                app_state.data["profiles"][app_state.active_profile]["hotkeys"][idx] = widget.text()
+                app_state.data["profiles"][app_state.active_profile]["hotkeys"][idx] = hotkey or widget.text()
             eh.editingFinished.connect(partial(validate_and_set_hotkey, idx=i, widget=eh))
             hl.addWidget(eh)
             app_state.hotkey_entries.append(eh)
