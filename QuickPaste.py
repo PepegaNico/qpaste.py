@@ -692,6 +692,8 @@ def register_hotkeys():
         next_id += 1
 
     logging.info(f"Registered {len(app_state.registered_hotkey_ids)} hotkeys for profile '{app_state.active_profile}'")
+    # Update health state for status bar
+    app_state.health_hotkeys_ok = len(app_state.registered_hotkey_ids) > 0 and not fehler
 
     # --- NativeEventFilter einmalig installieren, um WM_HOTKEY zu empfangen ---
     # Wir definieren den Filter lokal und installieren ihn nur einmal.
@@ -1268,9 +1270,12 @@ def update_ui():
         }}
     """)
     # Health indicator
-    status_text = "Bereit"
+    status_bits = []
     if not getattr(app_state, 'health_clipboard_ok', True):
-        status_text = "Warnung: Zwischenablage nicht erreichbar"
+        status_bits.append("Zwischenablage: Problem")
+    if not getattr(app_state, 'health_hotkeys_ok', True):
+        status_bits.append("Hotkeys: Problem")
+    status_text = "Bereit" if not status_bits else " | ".join(status_bits)
     win.statusBar().showMessage(status_text)
     toolbar.clear()
     profs = [p for p in app_state.data["profiles"] if p!="SDE"]
