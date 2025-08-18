@@ -748,7 +748,13 @@ def create_tray_icon():
             logging.warning(f"Failed to cleanup tray: {e}")
         app_state.tray = None
     app_state.tray = QSystemTrayIcon(QtGui.QIcon(ICON_PATH), win)
-    app_state.tray.setToolTip(f"Aktives Profil: {app_state.active_profile}")
+    # Build tray tooltip with health info
+    health_parts = [f"Profil: {app_state.active_profile}"]
+    if not getattr(app_state, 'health_clipboard_ok', True):
+        health_parts.append("Clipboard: Problem")
+    if not getattr(app_state, 'health_hotkeys_ok', True):
+        health_parts.append("Hotkeys: Problem")
+    app_state.tray.setToolTip(" | ".join(health_parts))
     menu = QMenu()
     for prof in app_state.data["profiles"]:
         label = f"✓ {prof}" if prof == app_state.active_profile else f"  {prof}"
@@ -763,6 +769,17 @@ def create_tray_icon():
     act_quit.triggered.connect(lambda: (save_window_position(), app.quit()))
     menu.addAction(act_quit)
     app_state.tray.setContextMenu(menu)
+    # Update tooltip reactively when switching profiles or registering hotkeys
+    def _refresh_tray_tooltip():
+        parts = [f"Profil: {app_state.active_profile}"]
+        if not getattr(app_state, 'health_clipboard_ok', True):
+            parts.append("Clipboard: Problem")
+        if not getattr(app_state, 'health_hotkeys_ok', True):
+            parts.append("Hotkeys: Problem")
+        app_state.tray.setToolTip(" | ".join(parts))
+    # Hook tooltip refresh to relevant events
+    app.installEventFilter(win)
+    _refresh_tray_tooltip()
     app_state.tray.activated.connect(
         lambda reason:
             (win.show(), win.raise_(), win.activateWindow()) 
