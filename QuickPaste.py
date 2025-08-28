@@ -198,9 +198,11 @@ def has_field_changes(profile_to_check=None):
                 titles.append(line_edits[0].text())
                 texts.append(text_edits[0].toHtml())
                 hks.append(line_edits[1].text())
-    return (titles != prof["titles"]
-         or texts  != prof["texts"]
-         or hks    != prof["hotkeys"])
+    cur_t, cur_x, cur_h = _normalized_triplet(titles, texts, hks)
+    ref_t, ref_x, ref_h = _normalized_triplet(
+        prof.get("titles", []), prof.get("texts", []), prof.get("hotkeys", [])
+    )
+    return (cur_t != ref_t or cur_x != ref_x or cur_h != ref_h)
 
 def save_profile_names():
     # Nur in Edit-Mode und wenn es Eingabefelder gibt
@@ -301,6 +303,26 @@ def validate_profile_data(titles, texts, hotkeys):
     
     return titles, texts, validated_hotkeys
 
+def _normalize_texts_to_consistent_html(html_list):
+    """Normalize a list of HTML strings by round-tripping through QTextDocument.toHtml()."""
+    normalized = []
+    for html in html_list:
+        doc = QtGui.QTextDocument()
+        doc.setHtml(html or "")
+        normalized.append(doc.toHtml())
+    return normalized
+
+def _normalize_hotkeys(hotkeys):
+    """Trim and lowercase hotkeys uniformly."""
+    return [ (hk or "").strip().lower() for hk in hotkeys ]
+
+def _normalized_triplet(titles, texts, hotkeys):
+    """Apply the same padding/validation and normalization pipeline to both sides before compare."""
+    vt, vx, vh = validate_profile_data(titles, texts, hotkeys)
+    vx = _normalize_texts_to_consistent_html(vx)
+    vh = _normalize_hotkeys(vh)
+    return vt, vx, vh
+
 def switch_profile(profile_name):
     if profile_name == app_state.active_profile:
         return
@@ -316,17 +338,22 @@ def switch_profile(profile_name):
                 current_texts.append(entry.text())
         current_hks = [entry.text() for entry in app_state.hotkey_entries]
         
-        # Validate and synchronize data before saving
+        # Validate and normalize both current UI values and stored values before comparing
         validated_titles, validated_texts, validated_hotkeys = validate_profile_data(
             current_titles, current_texts, current_hks
+        )
+        cur_t, cur_x, cur_h = _normalized_triplet(
+            validated_titles, validated_texts, validated_hotkeys
         )
         
         stored_data = app_state.data["profiles"][app_state.active_profile]
         
-        # VEREINFACHT: Direkter Vergleich ohne unused stored_plain_texts
-        has_changes = (validated_titles != stored_data["titles"] or 
-                      validated_texts != stored_data["texts"] or 
-                      validated_hotkeys != stored_data["hotkeys"])
+        # Prepare normalized reference values from stored data
+        ref_t, ref_x, ref_h = _normalized_triplet(
+            stored_data.get("titles", []), stored_data.get("texts", []), stored_data.get("hotkeys", [])
+        )
+        # Compare normalized values to avoid false positives from formatting/normalization
+        has_changes = (cur_t != ref_t or cur_x != ref_x or cur_h != ref_h)
         
         if has_changes:
             resp = show_question_message(
@@ -337,10 +364,10 @@ def switch_profile(profile_name):
             if resp == QtWidgets.QMessageBox.Cancel:
                 return
             if resp == QtWidgets.QMessageBox.Yes:
-                # Save validated data
-                app_state.data["profiles"][app_state.active_profile]["titles"] = validated_titles
-                app_state.data["profiles"][app_state.active_profile]["texts"] = validated_texts
-                app_state.data["profiles"][app_state.active_profile]["hotkeys"] = validated_hotkeys
+                # Save normalized data to keep future comparisons stable
+                app_state.data["profiles"][app_state.active_profile]["titles"] = cur_t
+                app_state.data["profiles"][app_state.active_profile]["texts"] = cur_x
+                app_state.data["profiles"][app_state.active_profile]["hotkeys"] = cur_h
                 
                 profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
                 debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
@@ -1188,9 +1215,12 @@ def save_data(stay_in_edit_mode=False):
             texts_new = [e.toHtml() if hasattr(e, 'toHtml') else e.text() for e in app_state.text_entries]
             hotkeys_new = [e.text() for e in app_state.hotkey_entries]
 
+            # Normalize before writing to storage to ensure consistent comparisons later
+            _, texts_new_norm, hotkeys_new_norm = _normalized_triplet(titles_new, texts_new, hotkeys_new)
+
             app_state.data["profiles"][app_state.active_profile]["titles"]  = titles_new
-            app_state.data["profiles"][app_state.active_profile]["texts"]   = texts_new
-            app_state.data["profiles"][app_state.active_profile]["hotkeys"] = hotkeys_new
+            app_state.data["profiles"][app_state.active_profile]["texts"]   = texts_new_norm
+            app_state.data["profiles"][app_state.active_profile]["hotkeys"] = hotkeys_new_norm
 
         profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
         debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": app_state.data["active_profile"]})
