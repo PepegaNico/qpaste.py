@@ -1,5 +1,7 @@
 import sys, os, json, re, ctypes, logging
 from PyQt5 import QtWidgets, QtGui, QtCore
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont, QFontMetrics
 from PyQt5.QtCore import QByteArray
 import time
 import pyperclip
@@ -19,6 +21,11 @@ LOG_FILE = os.path.join(APPDATA_PATH, "qp.log")
 logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", encoding="utf-8")
 BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "H.ico")
+
+DEFAULT_FONT_SIZE = 9  # Basis-Schriftgröße
+MIN_FONT_SIZE = 8
+MAX_FONT_SIZE = 24
+
 class QuickPasteState:
     """Centralized application state management"""
     def __init__(self):
@@ -41,6 +48,10 @@ class QuickPasteState:
         self.registered_hotkey_ids = []
         self.id_to_index = {}
         self.hotkey_filter_instance = None
+
+        self.base_font_size = DEFAULT_FONT_SIZE
+        self.font_scale_factor = 1.0
+        self.current_font_size = DEFAULT_FONT_SIZE
 
 # Global application state
 app_state = QuickPasteState()
@@ -91,7 +102,12 @@ def save_window_position():
     try:
         geo_bytes = win.saveGeometry()
         geo_hex   = bytes(geo_bytes.toHex()).decode()
-        cfg = {"geometry_hex": geo_hex, "dark_mode": app_state.dark_mode}
+        cfg = {
+            "geometry_hex": geo_hex, 
+            "dark_mode": app_state.dark_mode,
+            "font_scale_factor": app_state.font_scale_factor,
+            "base_font_size": app_state.base_font_size
+        }
         tmp = WINDOW_CONFIG + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
@@ -99,12 +115,22 @@ def save_window_position():
     except Exception as e:
         logging.exception(f"⚠ Fehler beim Speichern der Fensterposition: {e}")
 
+
 def load_window_position():
     try:
         with open(WINDOW_CONFIG, "r", encoding="utf-8") as f:
             cfg = json.load(f)
         if cfg.get("dark_mode") is not None:
             app_state.dark_mode = cfg["dark_mode"]
+        
+        # Font-Einstellungen laden
+        if cfg.get("font_scale_factor") is not None:
+            app_state.font_scale_factor = max(0.5, min(3.0, cfg["font_scale_factor"]))
+        if cfg.get("base_font_size") is not None:
+            app_state.base_font_size = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, cfg["base_font_size"]))
+        
+        app_state.current_font_size = app_state.base_font_size * app_state.font_scale_factor
+        
         hexstr = cfg.get("geometry_hex")
         if hexstr:
             ba = QByteArray.fromHex(hexstr.encode())
@@ -113,6 +139,285 @@ def load_window_position():
     except (FileNotFoundError, json.JSONDecodeError) as e:
         logging.warning(f"⚠ Fensterposition konnte nicht geladen werden: {e}")
         return None
+
+QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
+# Wenn PyQt >= 5.14:
+try:
+    QtWidgets.QApplication.setHighDpiScaleFactorRoundingPolicy(
+        QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+except Exception:
+    pass
+
+
+
+
+def setup_dpi_scaling():
+    """DPI-Skalierung für hochauflösende Displays aktivieren"""
+    try:
+        # High-DPI Support aktivieren (VOR QApplication!)
+        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
+        QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
+        
+        # Qt 5.14+ feature (falls verfügbar)
+        if hasattr(QtCore.Qt, 'AA_ScaleFactorRoundingPolicy'):
+            QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_ScaleFactorRoundingPolicy, True)
+    except Exception as e:
+        logging.warning(f"DPI scaling setup failed: {e}")
+
+def detect_system_dpi_scale():
+    """Erkennt die System-DPI-Skalierung"""
+    try:
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen:
+            dpi_ratio = screen.devicePixelRatio()
+            logical_dpi = screen.logicalDotsPerInch()
+            
+            # Basis-DPI ist normalerweise 96 auf Windows
+            base_dpi = 96
+            scale_factor = logical_dpi / base_dpi
+            
+            logging.info(f"System DPI: {logical_dpi}, Scale: {scale_factor:.2f}, Pixel Ratio: {dpi_ratio}")
+            return max(1.0, scale_factor)
+    except Exception as e:
+        logging.warning(f"DPI detection failed: {e}")
+    return 1.0
+
+def apply_font_scaling():
+    """Wendet die aktuelle Font-Skalierung auf die gesamte App an"""
+    try:
+        font_size = int(app_state.base_font_size * app_state.font_scale_factor)
+        font_size = max(MIN_FONT_SIZE, min(MAX_FONT_SIZE, font_size))
+        app_state.current_font_size = font_size
+        
+        # System-Font mit neuer Größe erstellen
+        app_font = QFont()
+        app_font.setPointSize(font_size)
+        app.setFont(app_font)
+        
+        # UI neu aufbauen
+        update_ui()
+        
+        logging.info(f"Font scaling applied: {font_size}pt (scale: {app_state.font_scale_factor:.2f})")
+        
+    except Exception as e:
+        logging.error(f"Font scaling failed: {e}")
+
+def change_font_scale(delta):
+    """Ändert die Font-Skalierung um delta (z.B. +0.1 oder -0.1)"""
+    old_scale = app_state.font_scale_factor
+    new_scale = max(0.5, min(3.0, old_scale + delta))
+    
+    if new_scale != old_scale:
+        app_state.font_scale_factor = new_scale
+        apply_font_scaling()
+        save_window_position()  # Speichert die neue Skalierung
+
+# 6. WHEEL-EVENT HANDLER für Ctrl+Scroll:
+
+class FontScaleEventFilter(QtCore.QObject):
+    """Event Filter für Ctrl+Scroll Font-Skalierung"""
+    
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Wheel:
+            modifiers = QtWidgets.QApplication.keyboardModifiers()
+            if modifiers & QtCore.Qt.ControlModifier:
+                angle_delta = event.angleDelta().y()
+                if angle_delta > 0:
+                    change_font_scale(0.1)  # Größer
+                elif angle_delta < 0:
+                    change_font_scale(-0.1)  # Kleiner
+                return True  # Event verbraucht
+        return super().eventFilter(obj, event)  # WICHTIG: super() aufrufen
+
+
+def install_font_scaling_globally():
+    """Installiert Font-Skalierung auf alle relevanten Widgets"""
+    try:
+        # Globaler Filter auf App-Level
+        if not hasattr(app, '_global_font_filter'):
+            global_filter = FontScaleEventFilter()
+            app.installEventFilter(global_filter)
+            app._global_font_filter = global_filter
+            
+        # Filter auf Hauptfenster
+        if not hasattr(win, '_font_filter'):
+            win_filter = FontScaleEventFilter()
+            win.installEventFilter(win_filter)
+            win._font_filter = win_filter
+            
+        # Filter auf zentrales Widget
+        if hasattr(win, 'centralWidget') and win.centralWidget():
+            if not hasattr(win.centralWidget(), '_font_filter'):
+                central_filter = FontScaleEventFilter()
+                win.centralWidget().installEventFilter(central_filter)
+                win.centralWidget()._font_filter = central_filter
+                
+        # Filter auf Scroll-Area
+        if 'scroll_area' in globals():
+            if not hasattr(scroll_area, '_font_filter'):
+                scroll_filter = FontScaleEventFilter()
+                scroll_area.installEventFilter(scroll_filter)
+                scroll_area._font_filter = scroll_filter
+                
+        logging.info("Font scaling filters installed globally")
+    except Exception as e:
+        logging.error(f"Failed to install font scaling: {e}")
+
+
+
+
+
+# 7. DYNAMISCHE TEXT-ANZEIGE:
+
+def get_dynamic_text_for_button(text_html, available_width):
+    """Berechnet wieviel Text in die verfügbare Breite passt"""
+    try:
+        doc = QtGui.QTextDocument()
+        doc.setHtml(text_html)
+        plain_text = doc.toPlainText().replace('\n', ' ').replace('\r', '').strip()
+        
+        if not plain_text:
+            return "(Leer)"
+        
+        # Font-Metriken basierend auf aktueller Schriftgröße
+        font = QFont()
+        font.setPointSize(int(app_state.current_font_size))
+        metrics = QFontMetrics(font)
+        
+        # WENIGER konservatives Padding: nur 16px statt 24px
+        usable_width = max(100, available_width - 16)
+        
+        # Ellipsis-Breite
+        ellipsis_text = "..."
+        ellipsis_width = metrics.horizontalAdvance(ellipsis_text)
+        
+        # Prüfen ob der ganze Text reinpasst
+        full_text_width = metrics.horizontalAdvance(plain_text)
+        if full_text_width <= usable_width:
+            return plain_text
+        
+        # Binäre Suche für optimale Textlänge (effizienter)
+        left, right = 0, len(plain_text)
+        best_length = 0
+        
+        while left <= right:
+            mid = (left + right) // 2
+            test_text = plain_text[:mid]
+            text_width = metrics.horizontalAdvance(test_text)
+            
+            if text_width + ellipsis_width <= usable_width:
+                best_length = mid
+                left = mid + 1
+            else:
+                right = mid - 1
+        
+        # Ergebnis aufbereiten
+        if best_length > 3:  # Mindestens 3 Zeichen vor "..."
+            return plain_text[:best_length].rstrip() + ellipsis_text
+        elif best_length > 0:
+            return plain_text[:best_length] + ellipsis_text
+        
+        return ellipsis_text
+        
+    except Exception as e:
+        logging.warning(f"Dynamic text calculation failed: {e}")
+        # Fallback zur alten Methode
+        doc = QtGui.QTextDocument()
+        doc.setHtml(text_html)
+        plain_text = doc.toPlainText()
+        first_line = plain_text.split('\n')[0].strip()
+        return first_line if first_line else "(Leer)"
+    
+
+def create_text_button(i, texts, hks, ebg, fg):
+    """Erstellt einen Text-Button mit dynamischer Größenanpassung"""
+    text_btn = QtWidgets.QPushButton()
+    text_btn.setStyleSheet(f"""
+        QPushButton {{
+            background: {ebg}; 
+            color: {fg}; 
+            text-align: left; 
+            padding: 8px 12px;  /* Weniger Padding für mehr Textplatz */
+            border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+            border-radius: 6px;
+            font-size: {int(app_state.current_font_size)}px;
+        }}
+        QPushButton:hover {{
+            background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
+            border: 1px solid {'#666' if app_state.dark_mode else '#999'};
+        }}
+        QPushButton:pressed {{
+            background: {'#555' if app_state.dark_mode else '#e0e0e0'};
+        }}
+    """)
+
+    text_btn.setFixedHeight(40)
+    text_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+
+    text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i]}")
+
+    
+    # Dynamischer Text - wird bei Resize automatisch angepasst
+    def update_button_text():
+        # Warten bis Button vollständig gerendert ist
+        QtWidgets.QApplication.processEvents()
+        button_width = text_btn.width()
+        
+        if button_width > 80:  # Nur wenn Button ausreichend breit ist
+            display_text = get_dynamic_text_for_button(texts[i], button_width)
+            if text_btn.text() != display_text:  # Nur updaten wenn anders
+                text_btn.setText(display_text)
+                logging.debug(f"Button {i}: width={button_width}, text='{display_text[:20]}...'")
+    
+    # Event für Größenänderung
+    original_resize_event = text_btn.resizeEvent
+    def custom_resize_event(event):
+        if original_resize_event:
+            original_resize_event(event)
+        # Mehrere Updates für bessere Ergebnisse
+        QtCore.QTimer.singleShot(0, update_button_text)
+        QtCore.QTimer.singleShot(50, update_button_text)
+    
+    text_btn.resizeEvent = custom_resize_event
+    text_btn.clicked.connect(partial(copy_text_to_clipboard, i))
+    
+    # Font-Scale Event Filter auch auf Button anwenden
+    font_filter = FontScaleEventFilter()
+    text_btn.installEventFilter(font_filter)
+    
+    # Initiales Text-Update mit mehreren Versuchen
+    QtCore.QTimer.singleShot(10, update_button_text)
+    QtCore.QTimer.singleShot(100, update_button_text)
+    QtCore.QTimer.singleShot(200, update_button_text)
+    
+    return text_btn
+
+
+# 9. HAUPTFENSTER-INITIALISIERUNG ERWEITERN:
+
+def initialize_application():
+    """Initialisiert die Anwendung mit DPI-Support"""
+    setup_dpi_scaling()
+    
+    app = QtWidgets.QApplication(sys.argv)
+    
+    system_scale = detect_system_dpi_scale()
+    if app_state.font_scale_factor == 1.0:
+        app_state.font_scale_factor = system_scale
+    
+    apply_font_scaling()
+    
+    # Event Filter GLOBAL installieren (nicht nur auf app)
+    font_filter = FontScaleEventFilter()
+    app.installEventFilter(font_filter)
+    
+    if sys.platform.startswith("win"):
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuickPaste")
+    
+    return app
+
 
 #endregion
 
@@ -1229,7 +1534,7 @@ def confirm_and_then(action_if_yes):
 
 #region Hauptfenster
 
-app = QtWidgets.QApplication(sys.argv)
+app = initialize_application()
 if sys.platform.startswith("win"):
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuickPaste")
 win = QtWidgets.QMainWindow()
@@ -1238,7 +1543,6 @@ win.setMinimumSize(399, 100)
 win.setWindowIcon(QtGui.QIcon(ICON_PATH) if os.path.exists(ICON_PATH) else win.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon))
 QtCore.QTimer.singleShot(500, lambda: win.setWindowIcon(QtGui.QIcon(ICON_PATH) if os.path.exists(ICON_PATH) else win.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon)))
 win.statusBar().showMessage("Bereit")
-
 def close_event_handler(event):
     if not win.isVisible():
         event.ignore()
@@ -1264,6 +1568,24 @@ entries_layout.setAlignment(QtCore.Qt.AlignTop)
 entries_layout.setSpacing(6)
 entries_layout.setContentsMargins(8, 8, 8, 8)
 scroll_area.setWidget(container)
+QtCore.QTimer.singleShot(0, install_font_scaling_globally)
+
+
+
+def install_font_scaling_on_window():
+    """Installiert Font-Skalierung auf das Hauptfenster"""
+    if hasattr(win, '_font_filter'):
+        return  # Bereits installiert
+    
+    font_filter = FontScaleEventFilter()
+    win.installEventFilter(font_filter)
+    win._font_filter = font_filter  # Referenz behalten
+    
+    # Auch auf zentrale Widgets anwenden
+    if hasattr(win, 'centralWidget') and win.centralWidget():
+        win.centralWidget().installEventFilter(font_filter)
+    
+    logging.info("Font scaling event filter installed on window")
 
 #endregion
 
@@ -1548,6 +1870,9 @@ def update_ui():
         hl  = QtWidgets.QHBoxLayout(row)
         hl.setContentsMargins(8, 4, 8, 4)
         hl.setSpacing(12)
+        hl.setStretch(0, 0)   # Titel
+        hl.setStretch(1, 1)   # Text-Button (soll wachsen)
+        hl.setStretch(2, 0)   # Hotkey-Button
         if app_state.edit_mode:
             drag_handle = QtWidgets.QLabel("☰")
             drag_handle.setFixedSize(20, 28)
@@ -1621,37 +1946,7 @@ def update_ui():
             hl.addWidget(ex, 1)
             app_state.text_entries.append(ex)
         else:
-            text_btn = QtWidgets.QPushButton()
-            text_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {ebg}; 
-                    color: {fg}; 
-                    text-align: left; 
-                    padding: 10px 12px;
-                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                    border-radius: 6px;
-                    font-size: 13px;
-                }}
-                QPushButton:hover {{
-                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
-                    border: 1px solid {'#666' if app_state.dark_mode else '#999'};
-                }}
-                QPushButton:pressed {{
-                    background: {'#555' if app_state.dark_mode else '#e0e0e0'};
-                }}
-            """)
-            text_btn.setFixedHeight(40)
-            text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i]}")
-            display_text = QtGui.QTextDocument()
-            display_text.setHtml(texts[i])
-            plain_text = display_text.toPlainText()
-            first_line = plain_text.split('\n')[0].strip()
-            if len(first_line) > 50:
-                display_text = first_line[:47] + "..."
-            else:
-                display_text = first_line if first_line else "(Leer)"
-            text_btn.setText(display_text)
-            text_btn.clicked.connect(partial(copy_text_to_clipboard, i))
+            text_btn = create_text_button(i, texts, hks, ebg, fg)
             hl.addWidget(text_btn, 1)
         if app_state.edit_mode:
             eh = QtWidgets.QLineEdit(hks[i])
