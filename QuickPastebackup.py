@@ -1901,7 +1901,7 @@ def update_ui():
     prof_data = app_state.data["profiles"][app_state.active_profile]
     titles, texts, hks = prof_data["titles"], prof_data["texts"], prof_data["hotkeys"]
     max_t = 120
-    max_h = 120
+    max_h = PX(120)
     for i, title in enumerate(titles):
         if app_state.edit_mode:
             row = DragDropWidget(i)
@@ -2050,7 +2050,7 @@ def update_ui():
             fm = QtGui.QFontMetrics(lh.font())
             pad_x = PX(20)  # links+rechts (entspricht padding oben)
             text_w = fm.horizontalAdvance(hk_text)
-            want_w = max(PX(60), text_w + pad_x)  # min 60px, sonst Textbreite
+            want_w = max(PX(110), text_w + pad_x)  # min 60px, sonst Textbreite
             lh.setMinimumWidth(want_w)
             lh.setMaximumWidth(want_w)  # exakt passend, keine wackelnden Layouts
 
