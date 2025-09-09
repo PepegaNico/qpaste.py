@@ -256,127 +256,35 @@ class WheelZoomFilter(QtCore.QObject):
                 return True
         return False
 
-
-# =============== 4. TEXT-BUTTON MIT DYNAMISCHEM TEXT ===============
-
-def create_dynamic_text_button(i, texts, hks, ebg, fg):
-    """Erstellt Text-Button mit dynamisch angepasstem Text"""
-    text_html = texts[i] if i < len(texts) else ""
-    
-    text_btn = QtWidgets.QPushButton()
-    text_btn.setStyleSheet(f"""
-        QPushButton {{
-            background: {ebg}; 
-            color: {fg}; 
-            text-align: left; 
-            padding: {PX(10)}px {PX(12)}px;
-            border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-            border-radius: {PX(6)}px;
-            font-size: {PX(13)}px;
-        }}
-        QPushButton:hover {{
-            background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
-        }}
-    """)
-
-    fm = QtGui.QFontMetrics(text_btn.font())
-    min_h = fm.height() + PX(16)          # Text-Höhe + Padding
-    text_btn.setFixedHeight(max(PX(36), min_h))
-
-    text_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-    text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i] if i < len(hks) else ''}")
-    
-    # Text dynamisch anpassen
-
-
-    def update_button_text():
-        try:
-            # HARTER GUARD: Button schon weg? Dann sofort raus.
-            if text_btn is None or sip.isdeleted(text_btn):
-                return
-
-            # Sichtbarkeit/Größe nur prüfen, wenn das Objekt lebt
-            if not text_btn.isVisible():
-                return
-
-            width = text_btn.width()
-            if width <= 0:
-                return
-
-            # HTML -> Plaintext
-            doc = QtGui.QTextDocument()
-            doc.setHtml(text_html)
-            plain_text = doc.toPlainText().replace('\n', ' ').strip()
-
-            if not plain_text:
-                text_btn.setText("(Leer)")
-                return
-
-            # Metriken & verfügbare Breite
-            font = text_btn.font()
-            metrics = QtGui.QFontMetrics(font)
-            padding = PX(30)
-            available = max(0, width - padding)
-
-            if metrics.horizontalAdvance(plain_text) <= available:
-                text_btn.setText(plain_text)
-                return
-
-            # Kürzen mit "."
-            ellipsis = "."
-            target = max(0, available - metrics.horizontalAdvance(ellipsis))
-            left, right, best = 0, len(plain_text), 0
-            while left <= right:
-                mid = (left + right) // 2
-                if metrics.horizontalAdvance(plain_text[:mid]) <= target:
-                    best = mid
-                    left = mid + 1
-                else:
-                    right = mid - 1
-
-            text_btn.setText((plain_text[:best].rstrip() if best > 0 else "") + ellipsis)
-
-        except RuntimeError:
-            # Wird geworfen, wenn das C++-Objekt mitten drin stirbt – einfach abbrechen.
-            pass
-        except Exception as e:
-            logging.warning(f"Button text update failed: {e}")
-            # Fallback nur setzen, wenn der Button noch existiert
-            try:
-                if text_btn is not None and not sip.isdeleted(text_btn):
-                    text_btn.setText(".")
-            except Exception:
-                pass
-
-    # Resize-Event sicher überschreiben
-    original_resize = text_btn.resizeEvent
-    def on_resize(event):
-        try:
-            if original_resize:
-                original_resize(event)
-            QtCore.QTimer.singleShot(0, update_button_text)  # 0ms reicht, Guard schützt
-        except RuntimeError:
-            pass
-    text_btn.resizeEvent = on_resize
-
-    # Initiales Update sicher auslösen
-    QtCore.QTimer.singleShot(0, update_button_text)
-
-    return text_btn
-
 # =============== 5. ZOOM-KONTROLLEN IN STATUSBAR ===============
 
 def create_zoom_controls():
-    """Erstellt Zoom-Kontrollen in der Statusbar"""
-    # Container
+    """Erstellt Zoom-Kontrollen in der Statusbar mit runden Buttons"""
     zoom_widget = QtWidgets.QWidget()
     layout = QtWidgets.QHBoxLayout(zoom_widget)
     layout.setContentsMargins(5, 0, 5, 0)
     layout.setSpacing(5)
     
-    # Zoom Out Button
+    # Zoom Out Button - RUND
     zoom_out_btn = QtWidgets.QPushButton("-")
-    zoom_out_btn.setFixedSize(PX(24), PX(24))
+    zoom_out_btn.setFixedSize(PX(28), PX(28))  # WICHTIG: Exakt gleiche Breite und Höhe
+    zoom_out_btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {'#444' if app_state.dark_mode else '#cccccc'};
+            color: {'white' if app_state.dark_mode else 'black'};
+            border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+            font-size: {PX(14)}px;
+            font-weight: bold;
+            border: none;
+        }}
+        QPushButton:hover {{
+            background-color: {'#666' if app_state.dark_mode else '#aaa'};
+        }}
+        QPushButton:disabled {{
+            background-color: {'#333' if app_state.dark_mode else '#ddd'};
+            color: {'#666' if app_state.dark_mode else '#999'};
+        }}
+    """)
     zoom_out_btn.setToolTip("Verkleinern (Strg+Mausrad)")
     zoom_out_btn.clicked.connect(lambda: apply_ui_scale_safe(app_state.ui_scale - 0.05))
     
@@ -384,23 +292,59 @@ def create_zoom_controls():
     zoom_label = QtWidgets.QLabel()
     zoom_label.setAlignment(QtCore.Qt.AlignCenter)
     zoom_label.setMinimumWidth(PX(48))
+    zoom_label.setStyleSheet(f"""
+        QLabel {{
+            color: {'white' if app_state.dark_mode else 'black'};
+            font-size: {PX(12)}px;
+            font-weight: bold;
+        }}
+    """)
     
     def update_label():
         percentage = int(app_state.ui_scale * 100)
         zoom_label.setText(f"{percentage}%")
-        # Buttons aktivieren/deaktivieren bei Limits
         zoom_out_btn.setEnabled(app_state.ui_scale > app_state.ui_scale_min)
         zoom_in_btn.setEnabled(app_state.ui_scale < app_state.ui_scale_max)
     
-    # Zoom In Button
+    # Zoom In Button - RUND
     zoom_in_btn = QtWidgets.QPushButton("+")
-    zoom_in_btn.setFixedSize(PX(24), PX(24))
+    zoom_in_btn.setFixedSize(PX(28), PX(28))  # WICHTIG: Exakt gleiche Breite und Höhe
+    zoom_in_btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {'#444' if app_state.dark_mode else '#cccccc'};
+            color: {'white' if app_state.dark_mode else 'black'};
+            border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+            font-size: {PX(14)}px;
+            font-weight: bold;
+            border: none;
+        }}
+        QPushButton:hover {{
+            background-color: {'#666' if app_state.dark_mode else '#aaa'};
+        }}
+        QPushButton:disabled {{
+            background-color: {'#333' if app_state.dark_mode else '#ddd'};
+            color: {'#666' if app_state.dark_mode else '#999'};
+        }}
+    """)
     zoom_in_btn.setToolTip("Vergrößern (Strg+Mausrad)")
     zoom_in_btn.clicked.connect(lambda: apply_ui_scale_safe(app_state.ui_scale + 0.05))
     
-    # Reset Button
+    # Reset Button - RUND
     reset_btn = QtWidgets.QPushButton("↺")
-    reset_btn.setFixedSize(PX(24), PX(24))
+    reset_btn.setFixedSize(PX(28), PX(28))  # WICHTIG: Exakt gleiche Breite und Höhe
+    reset_btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {'#444' if app_state.dark_mode else '#cccccc'};
+            color: {'white' if app_state.dark_mode else 'black'};
+            border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+            font-size: {PX(16)}px;
+            font-weight: bold;
+            border: none;
+        }}
+        QPushButton:hover {{
+            background-color: {'#666' if app_state.dark_mode else '#aaa'};
+        }}
+    """)
     reset_btn.setToolTip("Auf Auto-DPI zurücksetzen")
     reset_btn.clicked.connect(reset_to_auto_scale)
     
@@ -1757,176 +1701,246 @@ def insert_hyperlink_at_cursor(text_widget):
             cursor.setCharFormat(normal_format)
             text_widget.setTextCursor(cursor)
 
+
 def update_ui():
     app_state.title_entries = []
     app_state.text_entries = []
     app_state.hotkey_entries = []
     app_state.profile_entries = {}
+    
+    # Farben definieren
     bg    = "#2e2e2e" if app_state.dark_mode else "#eeeeee"
     fg    = "white"   if app_state.dark_mode else "black"
     ebg   = "#3c3c3c" if app_state.dark_mode else "white"
     bbg   = "#444"    if app_state.dark_mode else "#cccccc"
-    win.setStyleSheet(f"background:{bg};")
-    toolbar.setStyleSheet(f"background:{bg}; border: none;")
-    container.setStyleSheet(f"background:{bg};")
+    
+    # Basis-Styling
+    win.setStyleSheet(f"background-color:{bg};")
+    toolbar.setStyleSheet(f"background-color:{bg}; border: none;")
+    container.setStyleSheet(f"background-color:{bg};")
     win.statusBar().setStyleSheet(f"""
         QStatusBar {{
-            background: {bg};
+            background-color: {bg};
             color: {fg};
             border-top: 1px solid #666;
         }}
     """)
+    
     toolbar.clear()
+    
+    # Profile Buttons (wie vorher, aber mit background-color statt background)
     profs = [p for p in app_state.data["profiles"] if p!="SDE"]
     if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
         profs.append("SDE")
+        
     for prof in profs:
         frame = QtWidgets.QWidget()
         frame.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
         layout = QtWidgets.QHBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(4)
+        
         if app_state.edit_mode and prof != "SDE":
+            # LineEdit für Profilname
             entry = QtWidgets.QLineEdit(prof)
-            entry.setFixedWidth(PX(80))
-            entry.setStyleSheet(
-                f"background:{ebg}; color:{fg}; border-radius:{PX(5)}px; padding:{PX(4)}px;"
-            )
+            entry.setFixedWidth(PX(90))
+            entry.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color:{ebg}; 
+                    color:{fg}; 
+                    border-radius:{PX(15)}px;
+                    padding:{PX(6)}px {PX(12)}px;
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+                }}
+                QLineEdit:focus {{
+                    border: 2px solid #4a90e2;
+                }}
+            """)
             app_state.profile_entries[prof] = entry
             layout.addWidget(entry)
-            switch_btn = QtWidgets.QPushButton("🖊️" if prof == app_state.active_profile else "🖊️")
-            switch_btn.setFixedWidth(PX(28))
-            switch_btn.setStyleSheet(
-                f"""
-                background:{'#4a90e2' if prof == app_state.active_profile else bbg}; 
-                color:{fg}; 
-                border-radius:{PX(12)}px;
-                font-size: {PX(14)}px;
-                """
-            )
+            
+            # RUNDER Switch Button - KORRIGIERT
+            switch_btn = QtWidgets.QPushButton("🖊️")
+            switch_btn.setFixedSize(PX(36), PX(36))  # WICHTIG: Exakt gleich
+            switch_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {'#4a90e2' if prof == app_state.active_profile else bbg}; 
+                    color: {fg}; 
+                    border-radius: {PX(25)}px;  /* Radius = Höhe/2 */
+                    font-size: {PX(16)}px;
+                    border: none;
+                }}
+                QPushButton:hover {{
+                    background-color: {'#5aa3f0' if prof == app_state.active_profile else '#666'};
+                }}
+                QPushButton:pressed {{
+                    background-color: {'#357abd' if prof == app_state.active_profile else '#555'};
+                }}
+            """)
             switch_btn.setToolTip(f"Zu Profil '{prof}' wechseln")
             switch_btn.clicked.connect(partial(switch_profile, prof))
             layout.addWidget(switch_btn)
+            
+            # RUNDER Delete Button - KORRIGIERT
             delete_btn = QtWidgets.QPushButton("❌")
-            delete_btn.setFixedWidth(PX(28))
-            delete_btn.setStyleSheet(
-                f"background:{bbg}; color:{fg}; border-radius:{PX(12)}px;"
-            )
+            delete_btn.setFixedSize(PX(36), PX(36))  # WICHTIG: Exakt gleich
+            delete_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #d32f2f; 
+                    color: white; 
+                    border-radius: {PX(25)}px;  /* Radius = Höhe/2 */
+                    font-size: {PX(14)}px;
+                    border: none;
+                }}
+                QPushButton:hover {{ 
+                    background-color: #f44336;
+                }}
+                QPushButton:pressed {{
+                    background-color: #b71c1c;
+                }}
+            """)
             delete_btn.clicked.connect(partial(delete_profile, prof))
+            delete_btn.setToolTip(f"Profil '{prof}' löschen")
             layout.addWidget(delete_btn)
         else:
+            # Normaler Profil-Button
             btn = QtWidgets.QPushButton(prof)
-            btn.setStyleSheet(
-                f"""
+            btn.setStyleSheet(f"""
                 QPushButton {{
-                    background:{bbg}; color:{fg};
+                    background-color:{bbg}; 
+                    color:{fg};
                     font-weight:{'bold' if prof==app_state.active_profile else 'normal'};
-                    border-radius: {PX(5)}px;
-                    padding: {PX(6)}px {PX(16)}px;
-                    margin-right: 4px;
+                    border-radius: {PX(25)}px;
+                    padding: {PX(12)}px {PX(18)}px;
+                    margin-right: {PX(4)}px;
+                    border: {'2px solid #4a90e2' if prof==app_state.active_profile else 'none'};
                 }}
                 QPushButton:hover {{
-                    background:#666;
+                    background-color: {'#5aa3f0' if prof==app_state.active_profile else '#666'};
                 }}
-                """
-            )
+                QPushButton:pressed {{
+                    background-color: {'#357abd' if prof==app_state.active_profile else '#555'};
+                }}
+            """)
             btn.clicked.connect(partial(switch_profile, prof))
             layout.addWidget(btn)
         toolbar.addWidget(frame)
+    
+    # Spacer
     spacer = QtWidgets.QWidget()
     spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     toolbar.addWidget(spacer)
+    
+    # Add Profile Button (im Edit Mode)
     if app_state.edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
-        ap.setStyleSheet(
-            f"""
+        ap.setStyleSheet(f"""
             QPushButton {{
-                background:{bbg}; color:{fg};
-                border-radius: {PX(5)}px;
-                padding: {PX(6)}px {PX(16)}px;
-                margin-right: {PX(4)}px;
+                background-color:{bbg}; 
+                color:{fg};
+                border-radius: {PX(25)}px;
+                padding: {PX(12)}px {PX(18)}px;
+                margin-right: {PX(8)}px;
+                border: none;
             }}
             QPushButton:hover {{
-                background:#666;
+                background-color: #666;
             }}
-            """
-        )
+            QPushButton:pressed {{
+                background-color: #555;
+            }}
+        """)
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
 
-
+    # WICHTIG: Hauptfunktions-Buttons - KORRIGIERT für perfekt runde Buttons
     for text, func, tooltip in [
         ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
         ("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten")
     ]:
         b = QtWidgets.QPushButton(text)
         b.setToolTip(tooltip)
-        b.setFixedSize(PX(30), PX(30))  # Feste Größe statt min-width/height
-        b.setStyleSheet(
-            f"""
+        b.setFixedSize(PX(42), PX(42))  # WICHTIG: Exakt gleiche Breite und Höhe
+        b.setStyleSheet(f"""
             QPushButton {{
-                background:{bbg}; color:{fg};
-                border-radius: 50%;  /* 50% = immer rund! */
-                font-size: {PX(18)}px;
-                margin-left: {PX(6)}px;
+                background-color: {bbg}; 
+                color: {fg};
+                border-radius: {PX(21)}px; 
+                font-size: {PX(20)}px;
+                margin-left: {PX(8)}px;
                 border: none;
             }}
             QPushButton:hover {{
-                background:#888;
+                background-color: #666;
             }}
-            """
-        )
+            QPushButton:pressed {{
+                background-color: #555;
+            }}
+        """)
         b.clicked.connect(func)
         toolbar.addWidget(b)
 
-
+    # WICHTIG: Help Button - KORRIGIERT
     help_btn = QtWidgets.QPushButton("❓")
     help_btn.setToolTip("Hilfe anzeigen")
-    help_btn.setFixedSize(PX(30), PX(30))  # Feste Größe
-    help_btn.setStyleSheet(
-        f"""
+    help_btn.setFixedSize(PX(42), PX(42))  # WICHTIG: Exakt gleiche Breite und Höhe
+    help_btn.setStyleSheet(f"""
         QPushButton {{
-            background:{bbg}; color:{fg};
-            border-radius: 50%;  /* 50% = immer rund! */
-            font-size: {PX(18)}px;
-            margin-left: {PX(6)}px;
+            background-color: {bbg}; 
+            color: {fg};
+            border-radius: {PX(21)}px;
+            font-size: {PX(20)}px;
+            margin-left: {PX(8)}px;
             border: none;
         }}
         QPushButton:hover {{
-            background:#888;
+            background-color: #666;
         }}
-        """
-    )
+        QPushButton:pressed {{
+            background-color: #555;
+        }}
+    """)
     help_btn.clicked.connect(show_help_dialog)
     toolbar.addWidget(help_btn)
 
-
+    # ... (Rest der Funktion bleibt gleich, aber alle transform Eigenschaften entfernen)
+    # Einträge löschen
     while entries_layout.count():
         w = entries_layout.takeAt(0).widget()
         if w: w.deleteLater()
+    
+    # Einträge erstellen
     prof_data = app_state.data["profiles"][app_state.active_profile]
     titles, texts, hks = prof_data["titles"], prof_data["texts"], prof_data["hotkeys"]
-    max_t = 120
-    max_h = PX(120)
+    max_t = PX(140)
+    max_h = PX(130)
+    
     for i, title in enumerate(titles):
         if app_state.edit_mode:
             row = DragDropWidget(i)
         else:
             row = QtWidgets.QWidget()
         hl  = QtWidgets.QHBoxLayout(row)
-        hl.setContentsMargins(PX(8), PX(4), PX(8), PX(4))
-        hl.setSpacing(12)
+        hl.setContentsMargins(PX(12), PX(8), PX(12), PX(8))
+        hl.setSpacing(PX(16))
+        
         if app_state.edit_mode:
+            # Drag Handle
             drag_handle = QtWidgets.QLabel("☰")
-            drag_handle.setFixedSize(PX(20), PX(28))
+            drag_handle.setFixedSize(PX(32), PX(36))
             drag_handle.setStyleSheet(f"""
-                color: {fg}; 
-                background: {bbg}; 
-                padding: 2px 4px;
-                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                border-radius: {PX(4)}px;
-                font-size: {PX(14)}px;
-                text-align: center;
+                QLabel {{
+                    color: {fg}; 
+                    background-color: {bbg}; 
+                    padding: {PX(6)}px;
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+                    border-radius: {PX(16)}px;
+                    font-size: {PX(16)}px;
+                    font-weight: bold;
+                }}
+                QLabel:hover {{
+                    background-color: #666;
+                }}
             """)
             drag_handle.setAlignment(QtCore.Qt.AlignCenter)
             drag_handle.setToolTip("Ziehen zum Verschieben")
@@ -1935,50 +1949,77 @@ def update_ui():
             row.setAcceptDrops(True)
             drag_handle.mousePressEvent = lambda event, idx=i: start_drag(event, idx, drag_handle)
             hl.addWidget(drag_handle)
+            
         if app_state.edit_mode:
+            # Title Input
             et = QtWidgets.QLineEdit(title)
             et.setFixedWidth(max_t)
-            et.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: {PX(6)}px; padding: {PX(8)}px;")
+            et.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color:{ebg}; 
+                    color:{fg}; 
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; 
+                    border-radius: {PX(15)}px;
+                    padding: {PX(10)}px {PX(15)}px;
+                    font-size: {PX(13)}px;
+                }}
+                QLineEdit:focus {{
+                    border: 2px solid #4a90e2;
+                }}
+            """)
             def validate_and_set_title(idx, widget):
                 new_title = (widget.text() or "").strip()
                 if not new_title:
                     show_critical_message("Fehler", "Titel darf nicht leer sein!")
-                    # auf letzten gespeicherten Wert zurück
                     old = app_state.data["profiles"][app_state.active_profile]["titles"][idx]
                     widget.setText(old)
                     return
-                # Duplikate (case-insensitive) gegen alle anderen Title-Feldern prüfen
                 current_titles = [e.text().strip().lower() for j, e in enumerate(app_state.title_entries) if j != idx]
                 if new_title.lower() in current_titles:
                     show_critical_message("Fehler", f"Titel '{new_title}' wird bereits verwendet!")
                     old = app_state.data["profiles"][app_state.active_profile]["titles"][idx]
                     widget.setText(old)
                     return
-                # ok → ins State schreiben
                 app_state.data["profiles"][app_state.active_profile]["titles"][idx] = new_title
             et.editingFinished.connect(partial(validate_and_set_title, i, et))
             hl.addWidget(et)
             app_state.title_entries.append(et)
         else:
+            # Title Label
             lt = QtWidgets.QLabel(title)
             lt.setFixedWidth(max_t)
-            lt.setFixedHeight(40)
+            lt.setFixedHeight(PX(48))
             lt.setStyleSheet(f"""
-                color: {fg}; 
-                background: {ebg}; 
-                font-weight: bold; 
-                padding: {PX(10)}px {PX(12)}px;
-                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                border-radius: {PX(6)}px;
-                font-size: {PX(13)}px;
+                QLabel {{
+                    color: {fg}; 
+                    background-color: {ebg}; 
+                    font-weight: bold; 
+                    padding: {PX(12)}px {PX(16)}px;
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+                    border-radius: {PX(15)}px;
+                    font-size: {PX(14)}px;
+                }}
             """)
             lt.setAlignment(QtCore.Qt.AlignVCenter)
             hl.addWidget(lt)
+            
         if app_state.edit_mode:
+            # Text Input
             ex = QtWidgets.QTextEdit(texts[i])
-            ex.setMaximumHeight(80)
-            ex.setMinimumHeight(60)
-            ex.setStyleSheet(f"background:{ebg}; color:{fg};")
+            ex.setMaximumHeight(PX(90))
+            ex.setMinimumHeight(PX(70))
+            ex.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color:{ebg}; 
+                    color:{fg};
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+                    border-radius: {PX(15)}px;
+                    padding: {PX(10)}px;
+                }}
+                QTextEdit:focus {{
+                    border: 2px solid #4a90e2;
+                }}
+            """)
             ex.setAcceptRichText(True)
             ex.setHtml(texts[i])
             ex.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
@@ -1989,12 +2030,28 @@ def update_ui():
             hl.addWidget(ex, 1)
             app_state.text_entries.append(ex)
         else:
+            # Text Button (schon rund durch create_dynamic_text_button)
             text_btn = create_dynamic_text_button(i, texts, hks, ebg, fg)
             hl.addWidget(text_btn, 1)
+            
         if app_state.edit_mode:
+            # Hotkey Input
             eh = QtWidgets.QLineEdit(hks[i])
             eh.setFixedWidth(max_h)
-            eh.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: {PX(6)}px; padding: {PX(8)}px;")
+            eh.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color:{ebg}; 
+                    color:{fg}; 
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; 
+                    border-radius: {PX(15)}px;
+                    padding: {PX(10)}px {PX(15)}px;
+                    font-family: 'Consolas','Monaco',monospace;
+                    font-size: {PX(12)}px;
+                }}
+                QLineEdit:focus {{
+                    border: 2px solid #4a90e2;
+                }}
+            """)
             def validate_and_set_hotkey(idx, widget):
                 hotkey = widget.text().strip().lower()
                 erlaubte_zeichen = "1234567890befhmpqvxz§'^"
@@ -2024,66 +2081,212 @@ def update_ui():
             eh.editingFinished.connect(partial(validate_and_set_hotkey, idx=i, widget=eh))
             hl.addWidget(eh)
             app_state.hotkey_entries.append(eh)
+            
+            # RUNDER Delete Entry Button - KORRIGIERT
             delete_btn = QtWidgets.QPushButton("❌")
-            delete_btn.setFixedSize(PX(20), PX(20))
+            delete_btn.setFixedSize(PX(32), PX(32))  # WICHTIG: Exakt gleich
             delete_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'}; 
+                    background-color: #d32f2f; 
                     color: white; 
-                    border: 1px solid #b71c1c;
-                    border-radius: {PX(3)}px;
-                    font-size: {PX(10)}px;
+                    border-radius: {PX(16)}px;  /* Radius = Höhe/2 */
+                    font-size: {PX(12)}px;
+                    border: none;
                 }}
-                QPushButton:hover {{ background: #f44336; }}
+                QPushButton:hover {{ 
+                    background-color: #f44336;
+                }}
+                QPushButton:pressed {{
+                    background-color: #b71c1c;
+                }}
             """)
             delete_btn.clicked.connect(lambda _, j=i: delete_entry(j))
             delete_btn.setToolTip("Eintrag löschen")
             hl.addWidget(delete_btn)
         else:
+            # Hotkey Label
             hk_text = hks[i] if i < len(hks) else ""
             lh = QtWidgets.QLabel(hk_text)
             lh.setAlignment(QtCore.Qt.AlignCenter)
             lh.setStyleSheet(f"""
-                color: {fg};
-                background: {ebg};
-                padding: {PX(6)}px {PX(10)}px;
-                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                border-radius: {PX(6)}px;
-                font-size: {PX(13)}px;
-                font-family: 'Consolas','Monaco',monospace;
+                QLabel {{
+                    color: {fg};
+                    background-color: {ebg};
+                    padding: {PX(8)}px {PX(12)}px;
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+                    border-radius: {PX(15)}px;
+                    font-size: {PX(13)}px;
+                    font-family: 'Consolas','Monaco',monospace;
+                    font-weight: bold;
+                }}
             """)
-            # Breite dynamisch aus Text + Padding
+            # Breite dynamisch
             fm = QtGui.QFontMetrics(lh.font())
-            pad_x = PX(20)  # links+rechts (entspricht padding oben)
+            pad_x = PX(24)
             text_w = fm.horizontalAdvance(hk_text)
-            want_w = max(PX(110), text_w + pad_x)  # min 60px, sonst Textbreite
-            lh.setMinimumWidth(want_w)
-            lh.setMaximumWidth(want_w)  # exakt passend, keine wackelnden Layouts
-
-            # Höhe passend zur Font
-            want_h = max(PX(36), fm.height() + PX(12))
+            want_w = max(PX(120), text_w + pad_x)
+            lh.setFixedWidth(want_w)
+            want_h = max(PX(44), fm.height() + PX(16))
             lh.setFixedHeight(want_h)
-
-            lh.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
             hl.addWidget(lh)
-
 
         entries_layout.addWidget(row)
 
+    # Action Buttons (Speichern, Eintrag hinzufügen) - KORRIGIERT
     if app_state.edit_mode:
         bw = QtWidgets.QWidget()
         bl = QtWidgets.QHBoxLayout(bw)
-        bl.setContentsMargins(0,0,0,0)
+        bl.setContentsMargins(PX(12), PX(12), PX(12), PX(12))
+        bl.setSpacing(PX(16))
+        
+        # RUNDER Save Button - KORRIGIERT
         bs = QtWidgets.QPushButton("💾 Speichern")
-        bs.setStyleSheet("background:green;color:white;")
+        bs.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #4caf50;
+                color: white;
+                border-radius: {PX(22)}px;
+                padding: {PX(12)}px {PX(30)}px;
+                font-weight: bold;
+                font-size: {PX(14)}px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: #66bb6a;
+            }}
+            QPushButton:pressed {{
+                background-color: #388e3c;
+            }}
+        """)
         bs.clicked.connect(save_data)
         bl.addWidget(bs)
+        
+        # RUNDER Add Entry Button - KORRIGIERT
         ba = QtWidgets.QPushButton("➕ Eintrag hinzufügen")
-        ba.setStyleSheet(f"background:{bbg}; color:{fg};")
+        ba.setStyleSheet(f"""
+            QPushButton {{
+                background-color:{bbg}; 
+                color:{fg};
+                border-radius: {PX(22)}px;
+                padding: {PX(12)}px {PX(30)}px;
+                font-size: {PX(14)}px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: #666;
+            }}
+            QPushButton:pressed {{
+                background-color: #555;
+            }}
+        """)
         ba.clicked.connect(add_new_entry)
         bl.addWidget(ba)
+        
         entries_layout.addWidget(bw)
 
+def create_dynamic_text_button(i, texts, hks, ebg, fg):
+    """Erstellt Text-Button mit dynamisch angepasstem Text und runden Ecken"""
+    text_html = texts[i] if i < len(texts) else ""
+    
+    text_btn = QtWidgets.QPushButton()
+    text_btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {ebg}; 
+            color: {fg}; 
+            text-align: left; 
+            padding: {PX(12)}px {PX(16)}px;
+            border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+            border-radius: {PX(25)}px;
+            font-size: {PX(13)}px;
+        }}
+        QPushButton:hover {{
+            background-color: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
+            border: 2px solid {'#666' if app_state.dark_mode else '#999'};
+        }}
+        QPushButton:pressed {{
+            background-color: {'#555' if app_state.dark_mode else '#e0e0e0'};
+        }}
+    """)
+
+    fm = QtGui.QFontMetrics(text_btn.font())
+    min_h = fm.height() + PX(24)
+    text_btn.setFixedHeight(max(PX(44), min_h))
+
+    text_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+    text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i] if i < len(hks) else ''}")
+    text_btn.clicked.connect(lambda: copy_text_to_clipboard(i))
+    
+    # Text dynamisch anpassen (ohne transform)
+    def update_button_text():
+        try:
+            if text_btn is None or sip.isdeleted(text_btn):
+                return
+
+            if not text_btn.isVisible():
+                return
+
+            width = text_btn.width()
+            if width <= 0:
+                return
+
+            # HTML -> Plaintext
+            doc = QtGui.QTextDocument()
+            doc.setHtml(text_html)
+            plain_text = doc.toPlainText().replace('\n', ' ').strip()
+
+            if not plain_text:
+                text_btn.setText("(Leer)")
+                return
+
+            # Metriken & verfügbare Breite
+            font = text_btn.font()
+            metrics = QtGui.QFontMetrics(font)
+            padding = PX(40)
+            available = max(0, width - padding)
+
+            if metrics.horizontalAdvance(plain_text) <= available:
+                text_btn.setText(plain_text)
+                return
+
+            # Kürzen mit "..."
+            ellipsis = "..."
+            target = max(0, available - metrics.horizontalAdvance(ellipsis))
+            left, right, best = 0, len(plain_text), 0
+            while left <= right:
+                mid = (left + right) // 2
+                if metrics.horizontalAdvance(plain_text[:mid]) <= target:
+                    best = mid
+                    left = mid + 1
+                else:
+                    right = mid - 1
+
+            text_btn.setText((plain_text[:best].rstrip() if best > 0 else "") + ellipsis)
+
+        except RuntimeError:
+            pass
+        except Exception as e:
+            logging.warning(f"Button text update failed: {e}")
+            try:
+                if text_btn is not None and not sip.isdeleted(text_btn):
+                    text_btn.setText("...")
+            except Exception:
+                pass
+
+    # Resize-Event sicher überschreiben
+    original_resize = text_btn.resizeEvent
+    def on_resize(event):
+        try:
+            if original_resize:
+                original_resize(event)
+            QtCore.QTimer.singleShot(0, update_button_text)
+        except RuntimeError:
+            pass
+    text_btn.resizeEvent = on_resize
+
+    # Initiales Update sicher auslösen
+    QtCore.QTimer.singleShot(0, update_button_text)
+
+    return text_btn
 
 
 #endregion
