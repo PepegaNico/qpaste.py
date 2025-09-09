@@ -1853,18 +1853,20 @@ def update_ui():
         )
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
+
+
     for text, func, tooltip in [
         ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
         ("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten")
     ]:
         b = QtWidgets.QPushButton(text)
         b.setToolTip(tooltip)
+        b.setFixedSize(PX(30), PX(30))  # Feste Größe statt min-width/height
         b.setStyleSheet(
             f"""
             QPushButton {{
                 background:{bbg}; color:{fg};
-                border-radius: {PX(15)}px;
-                min-width: {PX(30)}px; min-height: {PX(30)}px;
+                border-radius: 50%;  /* 50% = immer rund! */
                 font-size: {PX(18)}px;
                 margin-left: {PX(6)}px;
                 border: none;
@@ -1876,14 +1878,16 @@ def update_ui():
         )
         b.clicked.connect(func)
         toolbar.addWidget(b)
+
+
     help_btn = QtWidgets.QPushButton("❓")
     help_btn.setToolTip("Hilfe anzeigen")
+    help_btn.setFixedSize(PX(30), PX(30))  # Feste Größe
     help_btn.setStyleSheet(
         f"""
         QPushButton {{
             background:{bbg}; color:{fg};
-            border-radius: {PX(15)}px;
-            min-width: {PX(30)}px; min-height: {PX(30)}px;
+            border-radius: 50%;  /* 50% = immer rund! */
             font-size: {PX(18)}px;
             margin-left: {PX(6)}px;
             border: none;
@@ -1895,6 +1899,8 @@ def update_ui():
     )
     help_btn.clicked.connect(show_help_dialog)
     toolbar.addWidget(help_btn)
+
+
     while entries_layout.count():
         w = entries_layout.takeAt(0).widget()
         if w: w.deleteLater()
