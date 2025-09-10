@@ -1766,7 +1766,7 @@ def update_ui():
                 QPushButton {{
                     background-color: {'#4a90e2' if prof == app_state.active_profile else bbg}; 
                     color: {fg}; 
-                    border-radius: {PX(25)}px;  /* Radius = Höhe/2 */
+                    border-radius: 50%;
                     font-size: {PX(16)}px;
                     border: none;
                 }}
@@ -1788,7 +1788,7 @@ def update_ui():
                 QPushButton {{
                     background-color: #d32f2f; 
                     color: white; 
-                    border-radius: {PX(25)}px;  /* Radius = Höhe/2 */
+                    border-radius: 50px;
                     font-size: {PX(14)}px;
                     border: none;
                 }}
@@ -1810,7 +1810,7 @@ def update_ui():
                     background-color:{bbg}; 
                     color:{fg};
                     font-weight:{'bold' if prof==app_state.active_profile else 'normal'};
-                    border-radius: {PX(25)}px;
+                    border-radius: 50px;
                     padding: {PX(12)}px {PX(18)}px;
                     margin-right: {PX(4)}px;
                     border: {'2px solid #4a90e2' if prof==app_state.active_profile else 'none'};
@@ -1838,7 +1838,7 @@ def update_ui():
             QPushButton {{
                 background-color:{bbg}; 
                 color:{fg};
-                border-radius: {PX(25)}px;
+                border-radius: 50px;
                 padding: {PX(12)}px {PX(18)}px;
                 margin-right: {PX(8)}px;
                 border: none;
@@ -1865,7 +1865,7 @@ def update_ui():
             QPushButton {{
                 background-color: {bbg}; 
                 color: {fg};
-                border-radius: {PX(21)}px; 
+                border-radius: 50%;
                 font-size: {PX(20)}px;
                 margin-left: {PX(8)}px;
                 border: none;
@@ -1888,7 +1888,7 @@ def update_ui():
         QPushButton {{
             background-color: {bbg}; 
             color: {fg};
-            border-radius: {PX(21)}px;
+            border-radius: 50%;
             font-size: {PX(20)}px;
             margin-left: {PX(8)}px;
             border: none;
@@ -2089,7 +2089,7 @@ def update_ui():
                 QPushButton {{
                     background-color: #d32f2f; 
                     color: white; 
-                    border-radius: {PX(16)}px;  /* Radius = Höhe/2 */
+                    border-radius: 50px;
                     font-size: {PX(12)}px;
                     border: none;
                 }}
@@ -2145,7 +2145,7 @@ def update_ui():
             QPushButton {{
                 background-color: #4caf50;
                 color: white;
-                border-radius: {PX(22)}px;
+                border-radius: 50px;
                 padding: {PX(12)}px {PX(30)}px;
                 font-weight: bold;
                 font-size: {PX(14)}px;
@@ -2167,7 +2167,7 @@ def update_ui():
             QPushButton {{
                 background-color:{bbg}; 
                 color:{fg};
-                border-radius: {PX(22)}px;
+                border-radius: 50px;
                 padding: {PX(12)}px {PX(30)}px;
                 font-size: {PX(14)}px;
                 border: none;
@@ -2196,7 +2196,7 @@ def create_dynamic_text_button(i, texts, hks, ebg, fg):
             text-align: left; 
             padding: {PX(12)}px {PX(16)}px;
             border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-            border-radius: {PX(25)}px;
+            border-radius: 50px;
             font-size: {PX(13)}px;
         }}
         QPushButton:hover {{
