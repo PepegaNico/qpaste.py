@@ -1174,7 +1174,7 @@ def create_tray_icon():
         menu.addSeparator()
         
         # Standard-Actions
-        act_show = QAction("→ Öffnen", win)
+        act_show = QAction("↑ Öffnen", win)
         act_show.triggered.connect(lambda: (win.show(), win.raise_(), win.activateWindow()))
         menu.addAction(act_show)
         
@@ -1788,7 +1788,7 @@ def update_ui():
                 QPushButton {{
                     background-color: #d32f2f; 
                     color: white; 
-                    border-radius: 50px;
+                    border-radius: 50%;
                     font-size: {PX(14)}px;
                     border: none;
                 }}
@@ -1810,7 +1810,7 @@ def update_ui():
                     background-color:{bbg}; 
                     color:{fg};
                     font-weight:{'bold' if prof==app_state.active_profile else 'normal'};
-                    border-radius: 50px;
+                    border-radius: 50%;
                     padding: {PX(12)}px {PX(18)}px;
                     margin-right: {PX(4)}px;
                     border: {'2px solid #4a90e2' if prof==app_state.active_profile else 'none'};
@@ -1865,7 +1865,7 @@ def update_ui():
             QPushButton {{
                 background-color: {bbg}; 
                 color: {fg};
-                border-radius: 50%;
+                border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
                 font-size: {PX(20)}px;
                 margin-left: {PX(8)}px;
                 border: none;
@@ -1888,7 +1888,7 @@ def update_ui():
         QPushButton {{
             background-color: {bbg}; 
             color: {fg};
-            border-radius: 50%;
+            border-radius: {PX(20)}px;  /* Radius = Höhe/2 für perfekten Kreis */
             font-size: {PX(20)}px;
             margin-left: {PX(8)}px;
             border: none;
@@ -2327,7 +2327,7 @@ def apply_dark_mode_to_messagebox(msg):
                 background-color: #444 !important;
                 color: white !important;
                 border: 1px solid #666;
-                border-radius: 5px;
+                border-radius: 15px;
                 min-width: 60px;
                 min-height: 24px;
                 padding: 4px 8px;
@@ -2354,7 +2354,7 @@ def apply_dark_mode_to_messagebox(msg):
                     background-color: #444;
                     color: white !important;
                     border: 1px solid #666;
-                    border-radius: 5px;
+                    border-radius: 15px;
                     min-width: 60px;
                     min-height: 24px;
                     padding: 4px 8px;
