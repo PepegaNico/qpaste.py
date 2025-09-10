@@ -272,7 +272,7 @@ def create_zoom_controls():
         QPushButton {{
             background-color: {'#444' if app_state.dark_mode else '#cccccc'};
             color: {'white' if app_state.dark_mode else 'black'};
-            border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+            border-radius: 50%;  /* Prozent für perfekten Kreis */
             font-size: {PX(14)}px;
             font-weight: bold;
             border: none;
@@ -313,7 +313,7 @@ def create_zoom_controls():
         QPushButton {{
             background-color: {'#444' if app_state.dark_mode else '#cccccc'};
             color: {'white' if app_state.dark_mode else 'black'};
-            border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+            border-radius: 50%;  /* Prozent für perfekten Kreis */
             font-size: {PX(14)}px;
             font-weight: bold;
             border: none;
@@ -336,7 +336,7 @@ def create_zoom_controls():
         QPushButton {{
             background-color: {'#444' if app_state.dark_mode else '#cccccc'};
             color: {'white' if app_state.dark_mode else 'black'};
-            border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+            border-radius: 50%;  /* Prozent für perfekten Kreis */
             font-size: {PX(16)}px;
             font-weight: bold;
             border: none;
@@ -836,7 +836,7 @@ def release_all_modifier_keys():
         # VK-Codes: Ctrl, Shift, Alt, LWin, RWin
         modifiers = (0x11, 0x10, 0x12, 0x5B, 0x5C)
 
-        # Mehrfach versuchen, falls ein Event „hängen“ bleibt
+        # Mehrfach versuchen, falls ein Event „hängen" bleibt
         for _ in range(3):
             for vk in modifiers:
                 try:
@@ -869,7 +869,7 @@ def insert_text(index):
         return
 
     try:
-        # 1) Sicherstellen, dass keine Modifier „hängen“
+        # 1) Sicherstellen, dass keine Modifier „hängen"
         release_all_modifier_keys()
 
         # 2) HTML + Plaintext in die Zwischenablage legen
@@ -1174,7 +1174,7 @@ def create_tray_icon():
         menu.addSeparator()
         
         # Standard-Actions
-        act_show = QAction("↑ Öffnen", win)
+        act_show = QAction("→ Öffnen", win)
         act_show.triggered.connect(lambda: (win.show(), win.raise_(), win.activateWindow()))
         menu.addAction(act_show)
         
@@ -1810,7 +1810,7 @@ def update_ui():
                     background-color:{bbg}; 
                     color:{fg};
                     font-weight:{'bold' if prof==app_state.active_profile else 'normal'};
-                    border-radius: 50%;
+                    border-radius: 50px;
                     padding: {PX(12)}px {PX(18)}px;
                     margin-right: {PX(4)}px;
                     border: {'2px solid #4a90e2' if prof==app_state.active_profile else 'none'};
@@ -1865,7 +1865,7 @@ def update_ui():
             QPushButton {{
                 background-color: {bbg}; 
                 color: {fg};
-                border-radius: {PX(14)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+                border-radius: 50%;  /* Prozent für perfekten Kreis */
                 font-size: {PX(20)}px;
                 margin-left: {PX(8)}px;
                 border: none;
@@ -1888,7 +1888,7 @@ def update_ui():
         QPushButton {{
             background-color: {bbg}; 
             color: {fg};
-            border-radius: {PX(20)}px;  /* Radius = Höhe/2 für perfekten Kreis */
+            border-radius: 50%;  /* Prozent für perfekten Kreis */
             font-size: {PX(20)}px;
             margin-left: {PX(8)}px;
             border: none;
