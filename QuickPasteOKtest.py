@@ -1809,12 +1809,13 @@ def update_ui():
     profs = [p for p in app_state.data["profiles"] if p!="SDE"]
     if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
         profs.append("SDE")
+
     for prof in profs:
         frame = QtWidgets.QWidget()
         frame.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
         layout = QtWidgets.QHBoxLayout(frame)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(1 if app_state.mini_mode else 2)
         if app_state.edit_mode and prof != "SDE":
             entry = QtWidgets.QLineEdit(prof)
             entry.setFixedWidth(80)
@@ -1827,8 +1828,8 @@ def update_ui():
             switch_btn.setFixedWidth(28)
             switch_btn.setStyleSheet(
                 f"""
-                background:{'#4a90e2' if prof == app_state.active_profile else bbg}; 
-                color:{fg}; 
+                background:{'#4a90e2' if prof == app_state.active_profile else bbg};
+                color:{fg};
                 border-radius:12px;
                 """
             )
@@ -1844,19 +1845,25 @@ def update_ui():
             layout.addWidget(delete_btn)
         else:
             btn = QtWidgets.QPushButton(prof)
+            profile_padding_v = 4 if app_state.mini_mode else 6
+            profile_padding_h = 10 if app_state.mini_mode else 16
+            profile_margin = 2 if app_state.mini_mode else 4
+            font_size_rule = "font-size: 13px;" if app_state.mini_mode else ""
             btn.setStyleSheet(
                 f"""
                 QPushButton {{
                     background:{bbg}; color:{fg};
                     font-weight:{'bold' if prof==app_state.active_profile else 'normal'};
                     border-radius: 5px;
-                    padding: 6px 16px;
-                    margin-right: 4px;
+                    padding: {profile_padding_v}px {profile_padding_h}px;
+                    margin-right: {profile_margin}px;
+                    {font_size_rule}
                 }}
                 QPushButton:hover {{
                     background:#666;
                 }}
                 """
+
             )
             btn.clicked.connect(partial(switch_profile, prof))
             layout.addWidget(btn)
@@ -1881,6 +1888,11 @@ def update_ui():
         )
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
+
+
+    control_size = 26 if app_state.mini_mode else 30
+    control_radius = 12 if app_state.mini_mode else 15
+    control_margin = 4 if app_state.mini_mode else 6
     for text, func, tooltip in [
         ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
         ("🗕" if not app_state.mini_mode else "🗖", toggle_mini_mode, "Mini-Ansicht umschalten"),
@@ -1892,10 +1904,11 @@ def update_ui():
             f"""
             QPushButton {{
                 background:{bbg}; color:{fg};
-                border-radius: 15px;
-                min-width: 30px; min-height: 30px;
-                margin-left: 6px;
+                border-radius: {control_radius}px;
+                min-width: {control_size}px; min-height: {control_size}px;
+                margin-left: {control_margin}px;
                 border: none;
+                padding: 0;
             }}
             QPushButton:hover {{
                 background:#888;
@@ -1910,10 +1923,11 @@ def update_ui():
         f"""
         QPushButton {{
             background:{bbg}; color:{fg};
-            border-radius: 15px;
-            min-width: 30px; min-height: 30px;
-            margin-left: 6px;
+            border-radius: {control_radius}px;
+            min-width: {control_size}px; min-height: {control_size}px;
+            margin-left: {control_margin}px;
             border: none;
+            padding: 0;
         }}
         QPushButton:hover {{
             background:#888;
@@ -1933,14 +1947,19 @@ def update_ui():
         if not app_state.edit_mode and app_state.mini_mode:
             hotkey = hks[i] if i < len(hks) else ""
             title_text = title or ""
+
+
+
+
+
             mini_button = QtWidgets.QPushButton()
+            mini_hotkey_color = '#d0d0d0' if app_state.dark_mode else '#333333'
             mini_button.setStyleSheet(f"""
                 QPushButton {{
                     background: {ebg};
-
                     border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                     border-radius: 6px;
-                    padding: 0;
+                    padding: 2px 6px;
                 }}
                 QPushButton:hover {{
                     background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
@@ -1949,14 +1968,22 @@ def update_ui():
                     color: {fg};
                     font-weight: bold;
                     background: transparent;
+                    padding: 0;
+                }}
+                QPushButton QLabel#miniHotkeyLabel {{
+                    font-weight: normal;
+                    padding-left: 4px;
+                    padding-right: 2px;
+                    font-size: 12px;
+                    color: {mini_hotkey_color};
                 }}
 
             """)
-            mini_button.setFixedHeight(int(40 * app_state.zoom_level))
+            mini_button.setFixedHeight(int(36 * app_state.zoom_level))
             mini_button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             mini_layout = QtWidgets.QHBoxLayout()
-            mini_layout.setContentsMargins(12, 10, 12, 10)
-            mini_layout.setSpacing(12)
+            mini_layout.setContentsMargins(6, 4, 6, 4)
+            mini_layout.setSpacing(6)
             mini_button.setLayout(mini_layout)
             title_label = QtWidgets.QLabel(title_text)
             title_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
@@ -1967,6 +1994,7 @@ def update_ui():
                 hotkey_label.setObjectName("miniHotkeyLabel")
                 hotkey_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 hotkey_label.setSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Preferred)
+                hotkey_label.setMinimumWidth(0)
                 mini_layout.addWidget(hotkey_label)
             
             
@@ -2259,6 +2287,28 @@ def toggle_dark_mode():
     update_ui()
     save_window_position()
 
+def calculate_mini_mode_size():
+    """Berechnet dynamisch die Fenstergröße für den Mini-Mode."""
+    base_width = 260
+    base_height = 260
+
+    central_widget = win.centralWidget()
+    if central_widget is not None:
+        layout = central_widget.layout()
+        if layout is not None:
+            layout.activate()
+
+    hint = win.sizeHint()
+    if hint.isValid():
+        width = max(base_width, hint.width())
+        if app_state.normal_minimum_width:
+            max_allowed = max(base_width, app_state.normal_minimum_width - 40)
+            width = min(width, max_allowed)
+        height = max(base_height, min(hint.height(), 360))
+        return int(width), int(height)
+
+    return base_width, base_height
+
 def toggle_mini_mode():
     app_state.mini_mode = not app_state.mini_mode
     if app_state.mini_mode:
@@ -2268,8 +2318,10 @@ def toggle_mini_mode():
             app_state.saved_geometry = None
         if app_state.normal_minimum_width is None:
             app_state.normal_minimum_width = win.minimumWidth()
-        win.setMinimumWidth(320)
-        win.resize(320, 260)
+        update_ui()
+        mini_width, mini_height = calculate_mini_mode_size()
+        win.setMinimumWidth(mini_width)
+        win.resize(mini_width, mini_height)
     else:
         if app_state.normal_minimum_width is not None:
             win.setMinimumWidth(app_state.normal_minimum_width)
@@ -2280,7 +2332,7 @@ def toggle_mini_mode():
         else:
             win.resize(700, 500)
         app_state.saved_geometry = win.saveGeometry()
-    update_ui()
+        update_ui()
     save_window_position()
 
 #endregion
