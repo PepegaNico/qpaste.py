@@ -1954,12 +1954,13 @@ def update_ui():
 
             mini_button = QtWidgets.QPushButton()
             mini_hotkey_color = '#d0d0d0' if app_state.dark_mode else '#333333'
+            
             mini_button.setStyleSheet(f"""
                 QPushButton {{
                     background: {ebg};
                     border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                     border-radius: 6px;
-                    padding: 2px 6px;
+                    padding: 1px 4px;
                 }}
                 QPushButton:hover {{
                     background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
@@ -1979,11 +1980,11 @@ def update_ui():
                 }}
 
             """)
-            mini_button.setFixedHeight(int(36 * app_state.zoom_level))
+            mini_button.setFixedHeight(int(30 * app_state.zoom_level))
             mini_button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             mini_layout = QtWidgets.QHBoxLayout()
-            mini_layout.setContentsMargins(6, 4, 6, 4)
-            mini_layout.setSpacing(6)
+            mini_layout.setContentsMargins(4, 2, 4, 2)
+            mini_layout.setSpacing(4)
             mini_button.setLayout(mini_layout)
             title_label = QtWidgets.QLabel(title_text)
             title_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
