@@ -82,6 +82,7 @@ class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
 
     def __init__(self, base_style=None, arrow_color="black", parent=None, glyph="▼"):
         super().__init__(base_style or QtWidgets.QApplication.style())
+
         if parent is not None:
             self.setParent(parent)
         self._arrow_color = QtGui.QColor(arrow_color)
@@ -95,6 +96,10 @@ class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
             if painter is None:
                 return
             painter.save()
+
+
+
+
             painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
             painter.setPen(QtGui.QPen(self._arrow_color))
             font = painter.font()
@@ -102,10 +107,60 @@ class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
             if rect_height > 0:
                 font.setPixelSize(max(8, int(rect_height * 0.6)))
             painter.setFont(font)
+
+
             painter.drawText(option.rect, Qt.AlignCenter, self._glyph)
             painter.restore()
             return
         super().drawPrimitive(element, option, painter, widget)
+
+    def drawComplexControl(self, control, option, painter, widget=None):
+        if control == QtWidgets.QStyle.CC_ComboBox:
+            super().drawComplexControl(control, option, painter, widget)
+
+            if painter is None or option is None:
+                return
+
+            arrow_rect = self.subControlRect(
+                control,
+                option,
+                QtWidgets.QStyle.SC_ComboBoxArrow,
+                widget,
+            )
+
+            needs_fallback = (
+                not arrow_rect.isValid()
+                or arrow_rect.width() <= 0
+                or arrow_rect.height() <= 0
+            )
+
+            if needs_fallback:
+                arrow_size = option.rect.height()
+                if arrow_size > 0:
+                    fallback_rect = QtCore.QRect(
+                        option.rect.right() - arrow_size + 1,
+                        option.rect.top(),
+                        arrow_size,
+                        arrow_size,
+                    )
+                    arrow_rect = fallback_rect.intersected(option.rect)
+                else:
+                    arrow_rect = QtCore.QRect()
+
+            if needs_fallback and arrow_rect.isValid() and arrow_rect.width() > 0 and arrow_rect.height() > 0:
+                painter.save()
+                painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+                painter.setPen(QtGui.QPen(self._arrow_color))
+                font = painter.font()
+                rect_height = arrow_rect.height()
+                if rect_height > 0:
+                    font.setPixelSize(max(8, int(rect_height * 0.6)))
+                painter.setFont(font)
+                painter.drawText(arrow_rect, Qt.AlignCenter, self._glyph)
+                painter.restore()
+            return
+
+        super().drawComplexControl(control, option, painter, widget)
 
 
 class DebouncedSaver:
