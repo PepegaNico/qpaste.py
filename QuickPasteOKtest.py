@@ -147,7 +147,7 @@ class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
                 else:
                     arrow_rect = QtCore.QRect()
 
-            if needs_fallback and arrow_rect.isValid() and arrow_rect.width() > 0 and arrow_rect.height() > 0:
+            if arrow_rect.isValid() and arrow_rect.width() > 0 and arrow_rect.height() > 0:
                 painter.save()
                 painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
                 painter.setPen(QtGui.QPen(self._arrow_color))
