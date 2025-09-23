@@ -1883,27 +1883,68 @@ def update_ui():
         radius = scaled(7 if app_state.mini_mode else 11)
         padding_v = scaled(3 if app_state.mini_mode else 6)
         padding_h = scaled(8 if app_state.mini_mode else 14)
+        
+        
+        
         drop_width = scaled(20 if app_state.mini_mode else 26)
         border_color = "#555" if app_state.dark_mode else "#ccc"
+        arrow_base = max(2, scaled(6 if app_state.mini_mode else 8))
+        arrow_half = max(1, arrow_base // 2)
+        arrow_height = max(2, scaled(4 if app_state.mini_mode else 6))
+        arrow_margin_h = max(0, (drop_width - arrow_base) // 2)
+        arrow_margin_v = max(0, (combo_height - arrow_height) // 2)
         combo.setStyleSheet(
             f"""
             QComboBox {{
                 background:{bbg};
                 color:{fg};
+
+
                 border: 1px solid {border_color};
                 border-radius:{radius}px;
                 padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;
             }}
+
+
+
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width:{drop_width}px;
                 border-left: 1px solid {border_color};
+                padding:0;
+            }}
+            QComboBox::down-arrow {{
+                width:0;
+                height:0;
+                margin-left:{arrow_margin_h}px;
+                margin-right:{arrow_margin_h}px;
+                margin-top:{arrow_margin_v}px;
+                margin-bottom:{arrow_margin_v}px;
+                border-left:{arrow_half}px solid transparent;
+                border-right:{arrow_half}px solid transparent;
+                border-top:{arrow_height}px solid {fg};
+            }}
+            QComboBox::down-arrow:on {{
+                width:0;
+                height:0;
+                margin-left:{arrow_margin_h}px;
+                margin-right:{arrow_margin_h}px;
+                margin-top:{arrow_margin_v}px;
+                margin-bottom:{arrow_margin_v}px;
+                border-left:{arrow_half}px solid transparent;
+                border-right:{arrow_half}px solid transparent;
+                border-top:0;
+                border-bottom:{arrow_height}px solid {fg};
             }}
             QComboBox QAbstractItemView {{
                 background:{ebg};
                 color:{fg};
                 border: 1px solid {border_color};
+
+
+
+
                 selection-background-color:#4a90e2;
                 selection-color:white;
             }}
