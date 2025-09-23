@@ -45,6 +45,8 @@ class QuickPasteState:
         self.data = None
         self.active_profile = None
         self.profile_entries = {}
+        self.profile_selector = None
+        self.profile_delete_button = None
         self.last_ui_data = None
         self.registered_hotkey_ids = []
         self.id_to_index = {}
@@ -60,6 +62,21 @@ class QuickPasteState:
 
 # Global application state
 app_state = QuickPasteState()
+
+
+class ComboBoxItemProxy:
+    """Wrap QComboBox items to mimic QLineEdit behaviour."""
+
+    def __init__(self, combo_box, index):
+        self._combo_box = combo_box
+        self._index = index
+
+    def text(self):
+        return self._combo_box.itemText(self._index)
+
+    def setText(self, value):
+        self._combo_box.setItemText(self._index, value)
+
 
 class DebouncedSaver:
     def __init__(self, delay_ms=600):
@@ -332,11 +349,30 @@ def save_profile_names():
 
 
 def update_profile_buttons():
-    for prof, btn in app_state.profile_buttons.items():
-        if prof == app_state.active_profile:
-            btn.setStyleSheet("background: lightblue; font-weight: bold;")
-        else:
-            btn.setStyleSheet("")
+    combo = getattr(app_state, "profile_selector", None)
+    if combo is None:
+        return
+
+    target_index = -1
+    for idx in range(combo.count()):
+        if combo.itemData(idx) == app_state.active_profile:
+            target_index = idx
+            break
+
+    if target_index >= 0 and combo.currentIndex() != target_index:
+        with QtCore.QSignalBlocker(combo):
+            combo.setCurrentIndex(target_index)
+
+    delete_btn = getattr(app_state, "profile_delete_button", None)
+    if delete_btn is not None:
+        index = combo.currentIndex()
+        data = combo.itemData(index) if index >= 0 else None
+        can_delete = (
+            index >= 0
+            and combo.count() > 1
+            and data not in (None, "SDE")
+        )
+        delete_btn.setEnabled(can_delete)
 
 def validate_profile_data(titles, texts, hotkeys):
     """Validate and synchronize profile data arrays"""
@@ -1809,73 +1845,163 @@ def update_ui():
     entries_margin = 4 if app_state.mini_mode else 8
     entries_layout.setContentsMargins(entries_margin, entries_margin, entries_margin, entries_margin)
     entries_layout.setSpacing(4 if app_state.mini_mode else 6)
+    
+    
+    
+    
     toolbar.clear()
 
+    app_state.profile_buttons = {}
+    app_state.profile_selector = None
+    app_state.profile_delete_button = None
 
-
-
-    profs = [p for p in app_state.data["profiles"] if p!="SDE"]
+    profile_names = []
+    for profile_name in app_state.data["profiles"].keys():
+        if profile_name == "SDE":
+            continue
+        profile_names.append(profile_name)
     if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
-        profs.append("SDE")
+        profile_names.append("SDE")
 
-    for prof in profs:
-        frame = QtWidgets.QWidget()
-        frame.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
-        layout = QtWidgets.QHBoxLayout(frame)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(1 if app_state.mini_mode else 2)
-        if app_state.edit_mode and prof != "SDE":
-            entry = QtWidgets.QLineEdit(prof)
-            entry.setFixedWidth(80)
-            entry.setStyleSheet(
-                f"background:{ebg}; color:{fg}; border-radius:5px; padding:4px;"
-            )
-            app_state.profile_entries[prof] = entry
-            layout.addWidget(entry)
-            switch_btn = QtWidgets.QPushButton("🖊️" if prof == app_state.active_profile else "🖊️")
-            switch_btn.setFixedWidth(28)
-            switch_btn.setStyleSheet(
-                f"""
-                background:{'#4a90e2' if prof == app_state.active_profile else bbg};
+    if profile_names:
+        selector_container = QtWidgets.QWidget()
+        selector_container.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
+        selector_layout = QtWidgets.QHBoxLayout(selector_container)
+        selector_layout.setContentsMargins(0, 0, 0, 0)
+        selector_layout.setSpacing(1 if app_state.mini_mode else 3)
+
+        def scaled(value):
+            return max(1, int(value * app_state.zoom_level))
+
+        combo = QtWidgets.QComboBox()
+        combo.setEditable(app_state.edit_mode)
+        combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+        combo.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        combo_height = scaled(24 if app_state.mini_mode else 32)
+        combo.setFixedHeight(combo_height)
+        combo.setMinimumWidth(scaled(130 if app_state.mini_mode else 200))
+        radius = scaled(7 if app_state.mini_mode else 11)
+        padding_v = scaled(3 if app_state.mini_mode else 6)
+        padding_h = scaled(8 if app_state.mini_mode else 14)
+        drop_width = scaled(20 if app_state.mini_mode else 26)
+        border_color = "#555" if app_state.dark_mode else "#ccc"
+        combo.setStyleSheet(
+            f"""
+            QComboBox {{
+                background:{bbg};
                 color:{fg};
-                border-radius:12px;
-                """
-            )
-            switch_btn.setToolTip(f"Zu Profil '{prof}' wechseln")
-            switch_btn.clicked.connect(partial(switch_profile, prof))
-            layout.addWidget(switch_btn)
+                border: 1px solid {border_color};
+                border-radius:{radius}px;
+                padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width:{drop_width}px;
+                border-left: 1px solid {border_color};
+            }}
+            QComboBox QAbstractItemView {{
+                background:{ebg};
+                color:{fg};
+                border: 1px solid {border_color};
+                selection-background-color:#4a90e2;
+                selection-color:white;
+            }}
+            """
+        )
+        selector_layout.addWidget(combo)
+
+        app_state.profile_selector = combo
+
+        delete_btn = None
+        if app_state.edit_mode:
             delete_btn = QtWidgets.QPushButton("❌")
-            delete_btn.setFixedWidth(28)
+            btn_size = scaled(24 if app_state.mini_mode else 28)
+            delete_btn.setFixedSize(btn_size, btn_size)
+            btn_radius = max(8, btn_size // 2)
             delete_btn.setStyleSheet(
-                f"background:{bbg}; color:{fg}; border-radius:12px;"
-            )
-            delete_btn.clicked.connect(partial(delete_profile, prof))
-            layout.addWidget(delete_btn)
-        else:
-            btn = QtWidgets.QPushButton(prof)
-            profile_padding_v = 4 if app_state.mini_mode else 6
-            profile_padding_h = 10 if app_state.mini_mode else 16
-            profile_margin = 2 if app_state.mini_mode else 4
-            font_size_rule = "font-size: 13px;" if app_state.mini_mode else ""
-            btn.setStyleSheet(
                 f"""
                 QPushButton {{
-                    background:{bbg}; color:{fg};
-                    font-weight:{'bold' if prof==app_state.active_profile else 'normal'};
-                    border-radius: 5px;
-                    padding: {profile_padding_v}px {profile_padding_h}px;
-                    margin-right: {profile_margin}px;
-                    {font_size_rule}
+                    background:#d32f2f;
+                    color:white;
+                    border:none;
+                    border-radius:{btn_radius}px;
                 }}
                 QPushButton:hover {{
-                    background:#666;
+                    background:#f44336;
+                }}
+                QPushButton:pressed {{
+                    background:#b71c1c;
                 }}
                 """
-
             )
-            btn.clicked.connect(partial(switch_profile, prof))
-            layout.addWidget(btn)
-        toolbar.addWidget(frame)
+            delete_btn.setToolTip("Ausgewähltes Profil löschen")
+            selector_layout.addWidget(delete_btn)
+            app_state.profile_delete_button = delete_btn
+
+        toolbar.addWidget(selector_container)
+
+        for name in profile_names:
+            combo.addItem(name, name)
+
+        if app_state.edit_mode:
+            line_edit = combo.lineEdit()
+            if line_edit is not None:
+                line_edit.setPlaceholderText("Profilnamen bearbeiten")
+                line_edit.setStyleSheet(
+                    f"color:{fg}; background:transparent; border:none; padding:0px;"
+                )
+            for idx in range(combo.count()):
+                original = combo.itemData(idx)
+                if original and original != "SDE":
+                    app_state.profile_entries[original] = ComboBoxItemProxy(combo, idx)
+
+        def update_delete_state():
+            if delete_btn is None:
+                return
+            index = combo.currentIndex()
+            if index < 0:
+                delete_btn.setEnabled(False)
+                return
+            original = combo.itemData(index)
+            can_delete = (combo.count() > 1 and original not in (None, "SDE"))
+            delete_btn.setEnabled(can_delete)
+
+        def on_profile_changed(index):
+            update_delete_state()
+            if index < 0:
+                return
+            selected = combo.itemData(index) or combo.itemText(index)
+            if selected != app_state.active_profile:
+                switch_profile(selected)
+
+        combo.currentIndexChanged.connect(on_profile_changed)
+
+        if delete_btn is not None:
+            def on_delete_clicked():
+                index = combo.currentIndex()
+                if index < 0:
+                    return
+                target = combo.itemData(index) or combo.itemText(index)
+                delete_profile(target)
+
+            delete_btn.clicked.connect(on_delete_clicked)
+
+        current_index = next(
+            (i for i in range(combo.count()) if combo.itemData(i) == app_state.active_profile),
+            -1,
+        )
+        with QtCore.QSignalBlocker(combo):
+            if current_index >= 0:
+                combo.setCurrentIndex(current_index)
+            elif combo.count() > 0:
+                combo.setCurrentIndex(0)
+        update_delete_state()
+
+
+
+
+
     spacer = QtWidgets.QWidget()
     spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     toolbar.addWidget(spacer)
