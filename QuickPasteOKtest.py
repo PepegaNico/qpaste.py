@@ -63,7 +63,6 @@ class QuickPasteState:
 # Global application state
 app_state = QuickPasteState()
 
-
 class ComboBoxItemProxy:
     """Wrap QComboBox items to mimic QLineEdit behaviour."""
 
@@ -78,11 +77,44 @@ class ComboBoxItemProxy:
         self._combo_box.setItemText(self._index, value)
 
 
+class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
+    """Proxy style that paints a glyph for combo box arrows."""
+
+    def __init__(self, base_style=None, arrow_color="black", parent=None, glyph="▼"):
+        super().__init__(base_style or QtWidgets.QApplication.style())
+        if parent is not None:
+            self.setParent(parent)
+        self._arrow_color = QtGui.QColor(arrow_color)
+        self._glyph = glyph
+
+    def set_arrow_color(self, color):
+        self._arrow_color = QtGui.QColor(color)
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if element == QtWidgets.QStyle.PE_IndicatorArrowDown:
+            if painter is None:
+                return
+            painter.save()
+            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+            painter.setPen(QtGui.QPen(self._arrow_color))
+            font = painter.font()
+            rect_height = option.rect.height()
+            if rect_height > 0:
+                font.setPixelSize(max(8, int(rect_height * 0.6)))
+            painter.setFont(font)
+            painter.drawText(option.rect, Qt.AlignCenter, self._glyph)
+            painter.restore()
+            return
+        super().drawPrimitive(element, option, painter, widget)
+
+
 class DebouncedSaver:
     def __init__(self, delay_ms=600):
         self.timer = QtCore.QTimer()
         self.timer.setSingleShot(True)
-        self.timer.setInterval(delay_ms)   
+        self.timer.setInterval(delay_ms)
+
+
         self.timer.timeout.connect(self._save)
         self.pending_data = None
     
@@ -1883,16 +1915,14 @@ def update_ui():
         radius = scaled(7 if app_state.mini_mode else 11)
         padding_v = scaled(3 if app_state.mini_mode else 6)
         padding_h = scaled(8 if app_state.mini_mode else 14)
-        
-        
-        
         drop_width = scaled(20 if app_state.mini_mode else 26)
         border_color = "#555" if app_state.dark_mode else "#ccc"
-        arrow_base = max(2, scaled(6 if app_state.mini_mode else 8))
-        arrow_half = max(1, arrow_base // 2)
-        arrow_height = max(2, scaled(4 if app_state.mini_mode else 6))
-        arrow_margin_h = max(0, (drop_width - arrow_base) // 2)
-        arrow_margin_v = max(0, (combo_height - arrow_height) // 2)
+        arrow_style = ComboArrowGlyphStyle(
+            base_style=QtWidgets.QApplication.style(),
+            arrow_color=fg,
+            parent=combo,
+        )
+        combo.setStyle(arrow_style)
         combo.setStyleSheet(
             f"""
             QComboBox {{
@@ -1914,29 +1944,7 @@ def update_ui():
                 border-left: 1px solid {border_color};
                 padding:0;
             }}
-            QComboBox::down-arrow {{
-                width:0;
-                height:0;
-                margin-left:{arrow_margin_h}px;
-                margin-right:{arrow_margin_h}px;
-                margin-top:{arrow_margin_v}px;
-                margin-bottom:{arrow_margin_v}px;
-                border-left:{arrow_half}px solid transparent;
-                border-right:{arrow_half}px solid transparent;
-                border-top:{arrow_height}px solid {fg};
-            }}
-            QComboBox::down-arrow:on {{
-                width:0;
-                height:0;
-                margin-left:{arrow_margin_h}px;
-                margin-right:{arrow_margin_h}px;
-                margin-top:{arrow_margin_v}px;
-                margin-bottom:{arrow_margin_v}px;
-                border-left:{arrow_half}px solid transparent;
-                border-right:{arrow_half}px solid transparent;
-                border-top:0;
-                border-bottom:{arrow_height}px solid {fg};
-            }}
+
             QComboBox QAbstractItemView {{
                 background:{ebg};
                 color:{fg};
