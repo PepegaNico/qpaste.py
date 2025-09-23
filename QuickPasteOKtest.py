@@ -1797,6 +1797,7 @@ def update_ui():
     bbg   = "#444"    if app_state.dark_mode else "#cccccc"
     win.setStyleSheet(f"background:{bg};")
     toolbar.setStyleSheet(f"background:{bg}; border: none;")
+
     container.setStyleSheet(f"background:{bg};")
     win.statusBar().setStyleSheet(f"""
         QStatusBar {{
@@ -1805,7 +1806,14 @@ def update_ui():
             border-top: 1px solid #666;
         }}
     """)
+    entries_margin = 4 if app_state.mini_mode else 8
+    entries_layout.setContentsMargins(entries_margin, entries_margin, entries_margin, entries_margin)
+    entries_layout.setSpacing(4 if app_state.mini_mode else 6)
     toolbar.clear()
+
+
+
+
     profs = [p for p in app_state.data["profiles"] if p!="SDE"]
     if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
         profs.append("SDE")
@@ -1889,15 +1897,17 @@ def update_ui():
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
 
-
     control_size = 26 if app_state.mini_mode else 30
     control_radius = 12 if app_state.mini_mode else 15
     control_margin = 4 if app_state.mini_mode else 6
-    for text, func, tooltip in [
-        ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
-        ("🗕" if not app_state.mini_mode else "🗖", toggle_mini_mode, "Mini-Ansicht umschalten"),
-        ("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten")
-    ]:
+    controls = [
+        ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten")
+    ]
+    if not app_state.edit_mode:
+        controls.append(("🗕" if not app_state.mini_mode else "🗖", toggle_mini_mode, "Mini-Ansicht umschalten"))
+    if not app_state.mini_mode:
+        controls.append(("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten"))
+    for text, func, tooltip in controls:
         b = QtWidgets.QPushButton(text)
         b.setToolTip(tooltip)
         b.setStyleSheet(
@@ -1983,8 +1993,8 @@ def update_ui():
             mini_button.setFixedHeight(int(30 * app_state.zoom_level))
             mini_button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             mini_layout = QtWidgets.QHBoxLayout()
-            mini_layout.setContentsMargins(4, 2, 4, 2)
-            mini_layout.setSpacing(4)
+            mini_layout.setContentsMargins(2, 1, 2, 1)
+            mini_layout.setSpacing(2)
             mini_button.setLayout(mini_layout)
             title_label = QtWidgets.QLabel(title_text)
             title_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
@@ -2290,7 +2300,7 @@ def toggle_dark_mode():
 
 def calculate_mini_mode_size():
     """Berechnet dynamisch die Fenstergröße für den Mini-Mode."""
-    base_width = 260
+    base_width = 200
     base_height = 260
 
     central_widget = win.centralWidget()
@@ -2301,10 +2311,12 @@ def calculate_mini_mode_size():
 
     hint = win.sizeHint()
     if hint.isValid():
-        width = max(base_width, hint.width())
+        width_hint = hint.width()
         if app_state.normal_minimum_width:
-            max_allowed = max(base_width, app_state.normal_minimum_width - 40)
-            width = min(width, max_allowed)
+            max_allowed = max(base_width, app_state.normal_minimum_width - 200)
+        else:
+            max_allowed = base_width
+        width = max(base_width, min(width_hint, max_allowed))
         height = max(base_height, min(hint.height(), 360))
         return int(width), int(height)
 
