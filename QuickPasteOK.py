@@ -49,7 +49,10 @@ class QuickPasteState:
         self.registered_hotkey_ids = []
         self.id_to_index = {}
         self.hotkey_filter_instance = None
-        
+
+        self.mini_mode = False
+        self.saved_geometry = None
+
         # VEREINFACHTE Font-Verwaltung
         self.zoom_level = 1.0  # 75% bis 150%
         self.base_font_size = 9  # Basis-Größe
@@ -105,10 +108,15 @@ def save_window_position():
         geo_bytes = win.saveGeometry()
         geo_hex = bytes(geo_bytes.toHex()).decode()
         cfg = {
-            "geometry_hex": geo_hex, 
+            "geometry_hex": geo_hex,
             "dark_mode": app_state.dark_mode,
-            "zoom_level": app_state.zoom_level  # Zoom speichern
+            "zoom_level": app_state.zoom_level,  # Zoom speichern
+            "mini_mode": app_state.mini_mode
         }
+        if app_state.saved_geometry is not None:
+            cfg["normal_geometry_hex"] = bytes(app_state.saved_geometry.toHex()).decode()
+        else:
+            cfg["normal_geometry_hex"] = geo_hex
         tmp = WINDOW_CONFIG + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(cfg, f)
@@ -124,18 +132,29 @@ def load_window_position():
         
         if cfg.get("dark_mode") is not None:
             app_state.dark_mode = cfg["dark_mode"]
-        
+
+        if cfg.get("mini_mode") is not None:
+            app_state.mini_mode = cfg["mini_mode"]
+
         # Zoom laden (mit Limits)
         if cfg.get("zoom_level") is not None:
             app_state.zoom_level = max(0.75, min(1.5, cfg["zoom_level"]))
         else:
             # Erste Nutzung: Auto-DPI Detection
             app_state.zoom_level = detect_optimal_zoom()
-        
+
         hexstr = cfg.get("geometry_hex")
         if hexstr:
             ba = QByteArray.fromHex(hexstr.encode())
             win.restoreGeometry(ba)
+
+        normal_hex = cfg.get("normal_geometry_hex")
+        if normal_hex:
+            app_state.saved_geometry = QByteArray.fromHex(normal_hex.encode())
+        elif hexstr:
+            app_state.saved_geometry = QByteArray.fromHex(hexstr.encode())
+        else:
+            app_state.saved_geometry = None
         return True
     except (FileNotFoundError, json.JSONDecodeError):
         # Keine Config: Auto-DPI für ersten Start
@@ -1863,6 +1882,7 @@ def update_ui():
         toolbar.addWidget(ap)
     for text, func, tooltip in [
         ("🌙" if not app_state.dark_mode else "🌞", toggle_dark_mode, "Dunkelmodus umschalten"),
+        ("🗕" if not app_state.mini_mode else "🗖", toggle_mini_mode, "Mini-Ansicht umschalten"),
         ("🔧", toggle_edit_mode, "Bearbeitungsmodus umschalten")
     ]:
         b = QtWidgets.QPushButton(text)
@@ -1909,6 +1929,37 @@ def update_ui():
     max_t = 120
     max_h = 120
     for i, title in enumerate(titles):
+        if not app_state.edit_mode and app_state.mini_mode:
+            hotkey = hks[i] if i < len(hks) else ""
+            title_text = title or ""
+            display = title_text
+            if hotkey:
+                display = f"{title_text}  •  {hotkey}"
+            mini_button = QtWidgets.QPushButton(display)
+            mini_button.setStyleSheet(f"""
+                QPushButton {{
+                    background: {ebg};
+                    color: {fg};
+                    text-align: left;
+                    padding: 10px 12px;
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+                    border-radius: 6px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
+                }}
+            """)
+            mini_button.setFixedHeight(int(40 * app_state.zoom_level))
+            mini_button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+            tooltip_hotkey = hotkey or ""
+            if tooltip_hotkey:
+                mini_button.setToolTip(f"Klicken zum Kopieren • Hotkey: {tooltip_hotkey}")
+            else:
+                mini_button.setToolTip("Klicken zum Kopieren")
+            mini_button.clicked.connect(partial(copy_text_to_clipboard, i))
+            entries_layout.addWidget(mini_button)
+            continue
         if app_state.edit_mode:
             row = DragDropWidget(i)
         else:
@@ -2187,7 +2238,24 @@ def show_information_message(title, text, parent=None):
 def toggle_dark_mode():
     app_state.dark_mode = not app_state.dark_mode
     update_ui()
-    save_window_position()  
+    save_window_position()
+
+def toggle_mini_mode():
+    app_state.mini_mode = not app_state.mini_mode
+    if app_state.mini_mode:
+        try:
+            app_state.saved_geometry = win.saveGeometry()
+        except Exception:
+            app_state.saved_geometry = None
+        win.resize(420, 260)
+    else:
+        if app_state.saved_geometry is not None:
+            win.restoreGeometry(app_state.saved_geometry)
+        else:
+            win.resize(700, 500)
+        app_state.saved_geometry = win.saveGeometry()
+    update_ui()
+    save_window_position()
 
 #endregion
 
