@@ -23,9 +23,9 @@ logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format=
 BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "H.ico")
 
-DEFAULT_FONT_SIZE = 11  # Basis-Schriftgröße
-MIN_FONT_SIZE = 8
-MAX_FONT_SIZE = 18
+DEFAULT_FONT_SIZE = 9  # Basis-Schriftgröße
+MIN_FONT_SIZE = 9
+MAX_FONT_SIZE = 9
 
 class QuickPasteState:
     """Centralized application state management"""
@@ -52,7 +52,7 @@ class QuickPasteState:
         
         # VEREINFACHTE Font-Verwaltung
         self.zoom_level = 1.0  # 75% bis 150%
-        self.base_font_size = 11  # Basis-Größe
+        self.base_font_size = 9  # Basis-Größe
 
 # Global application state
 app_state = QuickPasteState()
@@ -2087,6 +2087,8 @@ def show_help_dialog():
         "• ❌ Eintrag löschen.\n"
         "• ➕ Eintrag hinzufügen: Fügt einen neuen Eintrag hinzu.\n"
         "• 💾 Speichern: Änderungen sichern.\n\n"
+        "Text markieren + Rechtsklick kann ein Hyperlink hinterlegt werden. \n"
+        "CTRL+Mausrad kann die Grösse angepasst werden. \n\n"
         "Bei Fragen oder Problemen: nico.wagner@bit.admin.ch"
     )
     show_information_message("QuickPaste Hilfe", help_text)
