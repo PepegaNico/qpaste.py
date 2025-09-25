@@ -78,82 +78,62 @@ class ComboBoxItemProxy:
 
 
 class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
-    GLYPH = "▾"   # Alternativen: "▼", "⏷", "⌄", "🞃"
+    GLYPH = "▼"   # Alternativen: "▼", "⏷", "⌄", "🞃"
 
     def drawComplexControl(self, control, option, painter, widget=None):
         if control == QtWidgets.QStyle.CC_ComboBox and isinstance(option, QtWidgets.QStyleOptionComboBox):
+            # Erst die Standard-ComboBox zeichnen (ohne Pfeil)
             super().drawComplexControl(control, option, painter, widget)
 
-            # rechte Pfeil-Zone
-            drop_w = 26
-            r = option.rect
-            arrow_rect = QtCore.QRect(r.right()-drop_w, r.top(), drop_w, r.height())
-
-            # Separator links von der Pfeil-Zone (optische Trennung)
-            sep = widget.palette().mid().color() if widget else QtGui.QColor("#888")
-            painter.save()
-            painter.setPen(QtGui.QPen(sep))
-            painter.drawLine(arrow_rect.left()-1, r.top()+2, arrow_rect.left()-1, r.bottom()-2)
-
-            # Emoji mittig zeichnen
-            pen = widget.palette().text().color() if widget else QtGui.QColor("#111")
-            painter.setPen(pen)
-            f = (widget.font() if widget else QtGui.QFont())
-            f.setFamily("Segoe UI Symbol")   # Windows: Emoji/Glyphs, passt auch für "▾"
-            f.setPointSizeF(max(9.0, arrow_rect.height()*0.55))
-            painter.setFont(f)
-            painter.drawText(arrow_rect, QtCore.Qt.AlignCenter, self.GLYPH)
-            painter.restore()
-            return
-
-        super().drawComplexControl(control, option, painter, widget)
-
-    def drawComplexControl(self, control, option, painter, widget=None):
-        if control == QtWidgets.QStyle.CC_ComboBox:
-            super().drawComplexControl(control, option, painter, widget)
-
-            if painter is None or option is None:
-                return
-
+            # Pfeil-Bereich berechnen
             arrow_rect = self.subControlRect(
                 control,
                 option,
                 QtWidgets.QStyle.SC_ComboBoxArrow,
-                widget,
+                widget
             )
 
-            needs_fallback = (
-                not arrow_rect.isValid()
-                or arrow_rect.width() <= 0
-                or arrow_rect.height() <= 0
+            # Fallback wenn arrow_rect ungültig ist
+            if not arrow_rect.isValid() or arrow_rect.width() <= 0 or arrow_rect.height() <= 0:
+                # Manuelle Berechnung des Pfeil-Bereichs
+                drop_w = 26
+                r = option.rect
+                arrow_rect = QtCore.QRect(r.right() - drop_w, r.top(), drop_w, r.height())
+
+            # Separator links vom Pfeil-Bereich zeichnen (optional)
+            sep_color = widget.palette().mid().color() if widget else QtGui.QColor("#888")
+            painter.save()
+            painter.setPen(QtGui.QPen(sep_color))
+            painter.drawLine(
+                arrow_rect.left() - 1, 
+                arrow_rect.top() + 2, 
+                arrow_rect.left() - 1, 
+                arrow_rect.bottom() - 2
             )
+            painter.restore()
 
-            if needs_fallback:
-                arrow_size = option.rect.height()
-                if arrow_size > 0:
-                    fallback_rect = QtCore.QRect(
-                        option.rect.right() - arrow_size + 1,
-                        option.rect.top(),
-                        arrow_size,
-                        arrow_size,
-                    )
-                    arrow_rect = fallback_rect.intersected(option.rect)
-                else:
-                    arrow_rect = QtCore.QRect()
-
-            if arrow_rect.isValid() and arrow_rect.width() > 0 and arrow_rect.height() > 0:
-                painter.save()
-                painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
-                painter.setPen(QtGui.QPen(self._arrow_color))
-                font = painter.font()
-                rect_height = arrow_rect.height()
-                if rect_height > 0:
-                    font.setPixelSize(max(8, int(rect_height * 0.6)))
-                painter.setFont(font)
-                painter.drawText(arrow_rect, Qt.AlignCenter, self._glyph)
-                painter.restore()
+            # Pfeil-Symbol zeichnen
+            painter.save()
+            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
+            
+            # Farbe für den Pfeil
+            text_color = widget.palette().text().color() if widget else QtGui.QColor("#111")
+            painter.setPen(text_color)
+            
+            # Font für das Symbol
+            font = widget.font() if widget else QtGui.QFont()
+            font.setFamily("Segoe UI Symbol")  # Gut für Windows
+            # Größe basierend auf der Höhe des Rechtecks
+            font_size = max(9.0, arrow_rect.height() * 0.55)
+            font.setPointSizeF(font_size)
+            painter.setFont(font)
+            
+            # Symbol mittig zeichnen
+            painter.drawText(arrow_rect, QtCore.Qt.AlignCenter, self.GLYPH)
+            painter.restore()
             return
 
+        # Für alle anderen Controls die Standard-Implementierung verwenden
         super().drawComplexControl(control, option, painter, widget)
 
 
@@ -1769,8 +1749,6 @@ entries_layout.setSpacing(6)
 entries_layout.setContentsMargins(8, 8, 8, 8)
 scroll_area.setWidget(container)
 QtCore.QTimer.singleShot(0, install_font_scaling_globally)
-QtWidgets.QApplication.setStyle(ComboArrowGlyphStyle(QtWidgets.QApplication.style()))
-
 
 
 
