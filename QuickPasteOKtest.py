@@ -78,41 +78,35 @@ class ComboBoxItemProxy:
 
 
 class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
-    """Proxy style that paints a glyph for combo box arrows."""
+    GLYPH = "▾"   # Alternativen: "▼", "⏷", "⌄", "🞃"
 
-    def __init__(self, base_style=None, arrow_color="black", parent=None, glyph="▼"):
-        super().__init__(base_style or QtWidgets.QApplication.style())
+    def drawComplexControl(self, control, option, painter, widget=None):
+        if control == QtWidgets.QStyle.CC_ComboBox and isinstance(option, QtWidgets.QStyleOptionComboBox):
+            super().drawComplexControl(control, option, painter, widget)
 
-        if parent is not None:
-            self.setParent(parent)
-        self._arrow_color = QtGui.QColor(arrow_color)
-        self._glyph = glyph
+            # rechte Pfeil-Zone
+            drop_w = 26
+            r = option.rect
+            arrow_rect = QtCore.QRect(r.right()-drop_w, r.top(), drop_w, r.height())
 
-    def set_arrow_color(self, color):
-        self._arrow_color = QtGui.QColor(color)
-
-    def drawPrimitive(self, element, option, painter, widget=None):
-        if element == QtWidgets.QStyle.PE_IndicatorArrowDown:
-            if painter is None:
-                return
+            # Separator links von der Pfeil-Zone (optische Trennung)
+            sep = widget.palette().mid().color() if widget else QtGui.QColor("#888")
             painter.save()
+            painter.setPen(QtGui.QPen(sep))
+            painter.drawLine(arrow_rect.left()-1, r.top()+2, arrow_rect.left()-1, r.bottom()-2)
 
-
-
-
-            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
-            painter.setPen(QtGui.QPen(self._arrow_color))
-            font = painter.font()
-            rect_height = option.rect.height()
-            if rect_height > 0:
-                font.setPixelSize(max(8, int(rect_height * 0.6)))
-            painter.setFont(font)
-
-
-            painter.drawText(option.rect, Qt.AlignCenter, self._glyph)
+            # Emoji mittig zeichnen
+            pen = widget.palette().text().color() if widget else QtGui.QColor("#111")
+            painter.setPen(pen)
+            f = (widget.font() if widget else QtGui.QFont())
+            f.setFamily("Segoe UI Symbol")   # Windows: Emoji/Glyphs, passt auch für "▾"
+            f.setPointSizeF(max(9.0, arrow_rect.height()*0.55))
+            painter.setFont(f)
+            painter.drawText(arrow_rect, QtCore.Qt.AlignCenter, self.GLYPH)
             painter.restore()
             return
-        super().drawPrimitive(element, option, painter, widget)
+
+        super().drawComplexControl(control, option, painter, widget)
 
     def drawComplexControl(self, control, option, painter, widget=None):
         if control == QtWidgets.QStyle.CC_ComboBox:
@@ -1775,6 +1769,8 @@ entries_layout.setSpacing(6)
 entries_layout.setContentsMargins(8, 8, 8, 8)
 scroll_area.setWidget(container)
 QtCore.QTimer.singleShot(0, install_font_scaling_globally)
+QtWidgets.QApplication.setStyle(ComboArrowGlyphStyle(QtWidgets.QApplication.style()))
+
 
 
 
@@ -1972,47 +1968,41 @@ def update_ui():
         padding_h = scaled(8 if app_state.mini_mode else 14)
         drop_width = scaled(20 if app_state.mini_mode else 26)
         border_color = "#555" if app_state.dark_mode else "#ccc"
-        arrow_style = ComboArrowGlyphStyle(
-            base_style=QtWidgets.QApplication.style(),
-            arrow_color=fg,
-            parent=combo,
-        )
-        combo.setStyle(arrow_style)
-        combo.setStyleSheet(
-            f"""
+
+
+        combo.setStyleSheet(f"""
             QComboBox {{
                 background:{bbg};
                 color:{fg};
-
-
                 border: 1px solid {border_color};
                 border-radius:{radius}px;
                 padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;
             }}
 
-
-
+            /* Rechte Subcontrol explizit runden + gleiche Farbe geben */
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
                 width:{drop_width}px;
                 border-left: 1px solid {border_color};
-                padding:0;
+                border-top-right-radius:{radius}px;
+                border-bottom-right-radius:{radius}px;
+                background:{bbg};
+                margin:0; padding:0;
             }}
+
+            /* Wir zeichnen den Emoji-Pfeil selbst → Default-Pfeil abschalten */
+            QComboBox::down-arrow {{ image: none; }}
 
             QComboBox QAbstractItemView {{
                 background:{ebg};
                 color:{fg};
                 border: 1px solid {border_color};
-
-
-
-
                 selection-background-color:#4a90e2;
                 selection-color:white;
             }}
-            """
-        )
+        """)
+
         selector_layout.addWidget(combo)
 
         app_state.profile_selector = combo
