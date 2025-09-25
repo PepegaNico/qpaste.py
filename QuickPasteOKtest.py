@@ -77,71 +77,52 @@ class ComboBoxItemProxy:
         self._combo_box.setItemText(self._index, value)
 
 
-class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
-    GLYPH = "▼"   # Alternativen: "▼", "⏷", "⌄", "🞃"
+class ProfileComboBox(QtWidgets.QComboBox):
+    """ComboBox mit intern gerendertem Pfeil-Glyph."""
 
-    def drawComplexControl(self, control, option, painter, widget=None):
-        if control == QtWidgets.QStyle.CC_ComboBox and isinstance(option, QtWidgets.QStyleOptionComboBox):
-            # Erst die Standard-ComboBox zeichnen (ohne Pfeil)
-            super().drawComplexControl(control, option, painter, widget)
+    GLYPH = "▼"  # Alternativen: "▼", "⏷", "⌄", "🞃"
 
-            # Pfeil-Bereich berechnen
-            arrow_rect = self.subControlRect(
-                control,
-                option,
-                QtWidgets.QStyle.SC_ComboBoxArrow,
-                widget
-            )
+    def paintEvent(self, event):
+        super().paintEvent(event)
 
-            # Fallback wenn arrow_rect ungültig ist
-            if not arrow_rect.isValid() or arrow_rect.width() <= 0 or arrow_rect.height() <= 0:
-                # Manuelle Berechnung des Pfeil-Bereichs
-                drop_w = 26
-                r = option.rect
-                arrow_rect = QtCore.QRect(r.right() - drop_w, r.top(), drop_w, r.height())
+        option = QtWidgets.QStyleOptionComboBox()
+        self.initStyleOption(option)
 
-            # Separator links vom Pfeil-Bereich zeichnen (optional)
-            sep_color = widget.palette().mid().color() if widget else QtGui.QColor("#888")
-            painter.save()
-            painter.setPen(QtGui.QPen(sep_color))
-            painter.drawLine(
-                arrow_rect.left() - 1, 
-                arrow_rect.top() + 2, 
-                arrow_rect.left() - 1, 
-                arrow_rect.bottom() - 2
-            )
-            painter.restore()
+        style = self.style()
+        arrow_rect = style.subControlRect(
+            QtWidgets.QStyle.CC_ComboBox,
+            option,
+            QtWidgets.QStyle.SC_ComboBoxArrow,
+            self,
+        )
 
-            # Pfeil-Symbol zeichnen (gefülltes Dreieck, damit der Kontrast stimmt)
-            painter.save()
-            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        if not arrow_rect.isValid() or arrow_rect.width() <= 0 or arrow_rect.height() <= 0:
+            # Fallback falls StyleSheet den Bereich nicht liefert
+            drop_w = self.style().pixelMetric(QtWidgets.QStyle.PM_ComboBoxButtonWidth, option, self)
+            if drop_w <= 0:
+                drop_w = int(self.height() * 0.8)
+            r = self.rect()
+            arrow_rect = QtCore.QRect(r.right() - drop_w, r.top(), drop_w, r.height())
 
-            # Farbe für den Pfeil (fällt auf hellem wie dunklem Hintergrund auf)
-            base_color = option.palette.buttonText().color()
-            if not option.state & QtWidgets.QStyle.State_Enabled:
-                base_color = option.palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText)
-            arrow_color = QtGui.QColor(base_color)
-            painter.setBrush(arrow_color)
-            painter.setPen(QtGui.QPen(arrow_color))
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
 
-            # Dreieck proportional zur verfügbaren Fläche aufziehen
-            inset = max(2, int(min(arrow_rect.width(), arrow_rect.height()) * 0.2))
-            triangle_rect = arrow_rect.adjusted(inset, inset, -inset, -inset)
-            size = min(triangle_rect.width(), triangle_rect.height())
-            center = triangle_rect.center()
-            half_width = size * 0.45
-            half_height = size * 0.35
-            points = [
-                QtCore.QPointF(center.x() - half_width, center.y() - half_height),
-                QtCore.QPointF(center.x() + half_width, center.y() - half_height),
-                QtCore.QPointF(center.x(), center.y() + half_height),
-            ]
-            painter.drawPolygon(QtGui.QPolygonF(points))
-            painter.restore()
-            return
+        base_palette = self.palette()
+        if self.isEnabled():
+            color = base_palette.color(QtGui.QPalette.ButtonText)
+        else:
+            color = base_palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText)
 
-        # Für alle anderen Controls die Standard-Implementierung verwenden
-        super().drawComplexControl(control, option, painter, widget)
+        painter.setPen(QtGui.QPen(color))
+
+        font = painter.font()
+        target_size = int(min(arrow_rect.width(), arrow_rect.height()) * 0.65)
+        if target_size > 0:
+            font.setPixelSize(target_size)
+        painter.setFont(font)
+
+        painter.drawText(arrow_rect, QtCore.Qt.AlignCenter, self.GLYPH)
+        painter.end()
 
 
 class DebouncedSaver:
@@ -1941,7 +1922,7 @@ def update_ui():
         def scaled(value):
             return max(1, int(value * app_state.zoom_level))
 
-        combo = QtWidgets.QComboBox()
+        combo = ProfileComboBox()
         combo.setEditable(app_state.edit_mode)
         combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         combo.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
@@ -1986,11 +1967,6 @@ def update_ui():
             }}
         """)
 
-        # Den Proxy-Stil als Attribut speichern, damit er nicht vom Garbage Collector
-        # eingesammelt wird und der benutzerdefinierte Pfeil sichtbar bleibt.
-        base_style = combo.style()
-        combo._arrow_proxy_style = ComboArrowGlyphStyle(base_style)
-        combo.setStyle(combo._arrow_proxy_style)
 
         selector_layout.addWidget(combo)
 
@@ -2005,10 +1981,11 @@ def update_ui():
             delete_btn.setStyleSheet(
                 f"""
                 QPushButton {{
-                    background:#d32f2f;
+                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
                     color:white;
-                    border:none;
-                    border-radius:{btn_radius}px;
+                    border: 1px solid #b71c1c;
+                    border-radius: 3px;
+                    
                 }}
                 QPushButton:hover {{
                     background:#f44336;
