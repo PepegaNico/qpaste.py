@@ -69,8 +69,11 @@ class ComboBoxItemProxy:
     def __init__(self, combo_box, index):
         self._combo_box = combo_box
         self._index = index
+        self._pending_text = None
 
     def text(self):
+        if self._pending_text is not None:
+            return self._pending_text
         if self._combo_box.isEditable() and self._combo_box.currentIndex() == self._index:
             line_edit = self._combo_box.lineEdit()
             if line_edit is not None:
@@ -78,11 +81,23 @@ class ComboBoxItemProxy:
         return self._combo_box.itemText(self._index)
 
     def setText(self, value):
+        self._pending_text = None
         if self._combo_box.currentIndex() == self._index and self._combo_box.isEditable():
             line_edit = self._combo_box.lineEdit()
             if line_edit is not None:
                 line_edit.setText(value)
         self._combo_box.setItemText(self._index, value)
+
+    def set_pending_text(self, value):
+        normalized_new = (value or "").strip()
+        original = (self._combo_box.itemData(self._index) or "").strip()
+        if normalized_new == original:
+            self._pending_text = None
+        else:
+            self._pending_text = value
+
+    def clear_pending_text(self):
+        self._pending_text = None
 
 class ProfileComboBox(QtWidgets.QComboBox):
     """ComboBox mit intern gerendertem Pfeil-Glyph."""
@@ -321,16 +336,49 @@ app_state.active_profile = app_state.data.get("active_profile", list(app_state.d
 
 #region profiles
 
+def _normalize_rich_text(value):
+    """Normalize rich-text HTML for reliable comparisons."""
+    doc = QtGui.QTextDocument()
+    doc.setHtml(value or "")
+    return doc.toHtml()
+
+
+def _normalize_title(value):
+    return (value or "").strip()
+
+
+def _normalize_hotkey(value):
+    return (value or "").strip().lower()
+
+
+def _normalize_rich_text(value):
+    """Normalize rich-text HTML for reliable comparisons."""
+    doc = QtGui.QTextDocument()
+    doc.setHtml(value or "")
+    return doc.toHtml()
+
+
+def _normalize_title(value):
+    return (value or "").strip()
+
+
+def _normalize_hotkey(value):
+    return (value or "").strip().lower()
+
+
 def has_field_changes(profile_to_check=None):
     if profile_to_check is None:
         profile_to_check = app_state.active_profile
+
+    if profile_to_check not in app_state.data["profiles"]:
+        return False
 
     if app_state.profile_entries:
         for old_name, entry in app_state.profile_entries.items():
             if old_name == "SDE":
                 continue
-            new_name = (entry.text() or "").strip()
-            if new_name != old_name:
+            new_name = _normalize_title(entry.text())
+            if new_name != _normalize_title(old_name):
                 return True
 
     prof = app_state.data["profiles"][profile_to_check]
@@ -348,9 +396,20 @@ def has_field_changes(profile_to_check=None):
                 titles.append(line_edits[0].text())
                 texts.append(text_edits[0].toHtml())
                 hks.append(line_edits[1].text())
-    return (titles != prof["titles"]
-         or texts  != prof["texts"]
-         or hks    != prof["hotkeys"])
+
+    normalized_titles = [_normalize_title(t) for t in titles]
+    normalized_texts = [_normalize_rich_text(t) for t in texts]
+    normalized_hotkeys = [_normalize_hotkey(h) for h in hks]
+
+    stored_titles = [_normalize_title(t) for t in prof.get("titles", [])]
+    stored_texts = [_normalize_rich_text(t) for t in prof.get("texts", [])]
+    stored_hotkeys = [_normalize_hotkey(h) for h in prof.get("hotkeys", [])]
+
+    return (
+        normalized_titles != stored_titles
+        or normalized_texts != stored_texts
+        or normalized_hotkeys != stored_hotkeys
+    )
 
 
 def apply_profile_renames(show_errors=True):
@@ -422,6 +481,29 @@ def apply_profile_renames(show_errors=True):
     app_state.data["profiles"] = new_profiles
     app_state.data["active_profile"] = app_state.active_profile
     return True
+
+
+def _remember_profile_name_edit(text):
+    if not app_state.edit_mode:
+        return
+
+    combo = getattr(app_state, "profile_selector", None)
+    if combo is None or not combo.isEditable():
+        return
+
+    index = combo.currentIndex()
+    if index < 0:
+        return
+
+    original = combo.itemData(index)
+    if not original or original == "SDE":
+        return
+
+    entry = app_state.profile_entries.get(original)
+    if entry is None:
+        return
+
+    entry.set_pending_text(text)
 
 
 def save_profile_names():
@@ -503,58 +585,55 @@ def validate_profile_data(titles, texts, hotkeys):
 def switch_profile(profile_name):
     if profile_name == app_state.active_profile:
         return
+
     was_visible = win.isVisible()
-    
-    if app_state.edit_mode and app_state.title_entries and app_state.text_entries and app_state.hotkey_entries:
-        current_titles = [entry.text() for entry in app_state.title_entries]
-        current_texts = []
-        for entry in app_state.text_entries:
-            if hasattr(entry, 'toHtml'):
-                current_texts.append(entry.toHtml())
-            else:
-                current_texts.append(entry.text())
-        current_hks = [entry.text() for entry in app_state.hotkey_entries]
-        
-        # Validate and synchronize data before saving
-        validated_titles, validated_texts, validated_hotkeys = validate_profile_data(
-            current_titles, current_texts, current_hks
+
+    def restore_active_in_selector():
+        combo = getattr(app_state, "profile_selector", None)
+        if combo is None:
+            return
+        target_index = next(
+            (i for i in range(combo.count()) if combo.itemData(i) == app_state.active_profile),
+            -1,
         )
-        
-        stored_data = app_state.data["profiles"][app_state.active_profile]
-        
-        # VEREINFACHT: Direkter Vergleich ohne unused stored_plain_texts
-        has_changes = (validated_titles != stored_data["titles"] or 
-                      validated_texts != stored_data["texts"] or 
-                      validated_hotkeys != stored_data["hotkeys"])
-        
-        if has_changes:
-            resp = show_question_message(
-                "Ungesicherte Änderungen",
-                "Du hast ungespeicherte Änderungen. Jetzt speichern?",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel
-            )
-            if resp == QtWidgets.QMessageBox.Cancel:
-                return
-            if resp == QtWidgets.QMessageBox.Yes:
-                # Save validated data
-                app_state.data["profiles"][app_state.active_profile]["titles"] = validated_titles
-                app_state.data["profiles"][app_state.active_profile]["texts"] = validated_texts
-                app_state.data["profiles"][app_state.active_profile]["hotkeys"] = validated_hotkeys
-                
-                profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
-                debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": profile_name})
-            elif resp == QtWidgets.QMessageBox.No:
-                try:
-                    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                        file_data = json.load(f)
-                    if app_state.active_profile in file_data.get("profiles", {}):
-                        app_state.data["profiles"][app_state.active_profile] = file_data["profiles"][app_state.active_profile].copy()
-                except (FileNotFoundError, json.JSONDecodeError, KeyError):
-                    pass
-    
+        if target_index < 0:
+            target_index = next(
+            (i for i in range(combo.count()) if combo.itemText(i) == app_state.active_profile),
+            -1,
+        )
+        if target_index >= 0:
+            with QtCore.QSignalBlocker(combo):
+                combo.setCurrentIndex(target_index)
+
+    if app_state.edit_mode and has_field_changes():
+        resp = show_question_message(
+            "Ungesicherte Änderungen",
+            "Du hast ungespeicherte Änderungen. Jetzt speichern?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel,
+        )
+
+        if resp == QtWidgets.QMessageBox.Cancel:
+            restore_active_in_selector()
+            return
+
+        if resp == QtWidgets.QMessageBox.Yes:
+            save_data(stay_in_edit_mode=True)
+        else:
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    file_data = json.load(f)
+                if app_state.active_profile in file_data.get("profiles", {}):
+                    app_state.data["profiles"][app_state.active_profile] = file_data["profiles"][app_state.active_profile].copy()
+            except (FileNotFoundError, json.JSONDecodeError, KeyError):
+                pass
+
     if profile_name not in app_state.data["profiles"]:
         show_critical_message("Fehler", f"Profil '{profile_name}' existiert nicht!")
         return
+    
+
+
+
     app_state.active_profile = profile_name
     app_state.data["active_profile"] = profile_name
     profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
@@ -1378,6 +1457,11 @@ def save_data(stay_in_edit_mode=False):
 
 def reset_unsaved_changes():
     app_state.unsaved_changes = False
+    if app_state.profile_entries:
+        for entry in app_state.profile_entries.values():
+            clear_pending = getattr(entry, "clear_pending_text", None)
+            if clear_pending is not None:
+                clear_pending()
 
 def confirm_and_then(action_if_yes):
     if not has_field_changes():
@@ -1865,6 +1949,7 @@ def update_ui():
                 line_edit.setStyleSheet(
                     f"color:{fg}; background:transparent; border:none; padding:0px;"
                 )
+                line_edit.textEdited.connect(_remember_profile_name_edit)
             for idx in range(combo.count()):
                 original = combo.itemData(idx)
                 if original and original != "SDE":
