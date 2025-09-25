@@ -1935,7 +1935,6 @@ def update_ui():
             return max(1, int(value * app_state.zoom_level))
 
         combo = QtWidgets.QComboBox()
-        combo.setStyle(ComboArrowGlyphStyle(combo.style()))
         combo.setEditable(app_state.edit_mode)
         combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         combo.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
@@ -1979,6 +1978,12 @@ def update_ui():
                 selection-color:white;
             }}
         """)
+
+        # Den Proxy-Stil als Attribut speichern, damit er nicht vom Garbage Collector
+        # eingesammelt wird und der benutzerdefinierte Pfeil sichtbar bleibt.
+        base_style = combo.style()
+        combo._arrow_proxy_style = ComboArrowGlyphStyle(base_style)
+        combo.setStyle(combo._arrow_proxy_style)
 
         selector_layout.addWidget(combo)
 
@@ -2401,7 +2406,7 @@ def show_help_dialog():
 
 #endregion
 
-#region darkmode
+#region darkmode/minimode/messagebox
 
 def apply_dark_mode_to_messagebox(msg):
     if app_state.dark_mode:
