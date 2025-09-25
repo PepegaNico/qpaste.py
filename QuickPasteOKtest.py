@@ -112,24 +112,31 @@ class ComboArrowGlyphStyle(QtWidgets.QProxyStyle):
             )
             painter.restore()
 
-            # Pfeil-Symbol zeichnen
+            # Pfeil-Symbol zeichnen (gefülltes Dreieck, damit der Kontrast stimmt)
             painter.save()
-            painter.setRenderHint(QtGui.QPainter.TextAntialiasing, True)
-            
-            # Farbe für den Pfeil
-            text_color = widget.palette().text().color() if widget else QtGui.QColor("#111")
-            painter.setPen(text_color)
-            
-            # Font für das Symbol
-            font = widget.font() if widget else QtGui.QFont()
-            font.setFamily("Segoe UI Symbol")  # Gut für Windows
-            # Größe basierend auf der Höhe des Rechtecks
-            font_size = max(9.0, arrow_rect.height() * 0.55)
-            font.setPointSizeF(font_size)
-            painter.setFont(font)
-            
-            # Symbol mittig zeichnen
-            painter.drawText(arrow_rect, QtCore.Qt.AlignCenter, self.GLYPH)
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+
+            # Farbe für den Pfeil (fällt auf hellem wie dunklem Hintergrund auf)
+            base_color = option.palette.buttonText().color()
+            if not option.state & QtWidgets.QStyle.State_Enabled:
+                base_color = option.palette.color(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText)
+            arrow_color = QtGui.QColor(base_color)
+            painter.setBrush(arrow_color)
+            painter.setPen(QtGui.QPen(arrow_color))
+
+            # Dreieck proportional zur verfügbaren Fläche aufziehen
+            inset = max(2, int(min(arrow_rect.width(), arrow_rect.height()) * 0.2))
+            triangle_rect = arrow_rect.adjusted(inset, inset, -inset, -inset)
+            size = min(triangle_rect.width(), triangle_rect.height())
+            center = triangle_rect.center()
+            half_width = size * 0.45
+            half_height = size * 0.35
+            points = [
+                QtCore.QPointF(center.x() - half_width, center.y() - half_height),
+                QtCore.QPointF(center.x() + half_width, center.y() - half_height),
+                QtCore.QPointF(center.x(), center.y() + half_height),
+            ]
+            painter.drawPolygon(QtGui.QPolygonF(points))
             painter.restore()
             return
 
