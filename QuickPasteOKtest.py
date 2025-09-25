@@ -2322,8 +2322,8 @@ def show_help_dialog():
         "• ❌ Eintrag löschen.\n"
         "• ➕ Eintrag hinzufügen: Fügt einen neuen Eintrag hinzu.\n"
         "• 💾 Speichern: Änderungen sichern.\n\n"
-        "Text markieren + Rechtsklick kann ein Hyperlink hinterlegt werden. \n"
-        "CTRL+Mausrad kann die Grösse angepasst werden. \n\n"
+        "Text markieren + Rechtsklick kann ein Hyperlink hinterlegt werden. \n\n"
+
         "Bei Fragen oder Problemen: nico.wagner@bit.admin.ch"
     )
     show_information_message("QuickPaste Hilfe", help_text)
