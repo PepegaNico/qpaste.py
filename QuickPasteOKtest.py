@@ -2373,8 +2373,9 @@ def update_ui():
 def show_help_dialog():
     help_text = (
         "QuickPaste Hilfe\n\n"
-        "• 🌙/🌞 Dunkelmodus: Wechselt zwischen hell/dunkel.\n\n"
-        "• 🔧 Bearbeiten: Titel, Texte und Hotkeys anpassen.\n\n"
+        "• 🌙/🌞 Dunkelmodus: Wechselt zwischen hell/dunkel.\n"
+        "• 🔧 Bearbeiten: Titel, Texte und Hotkeys anpassen.\n"
+        "• 🗕/🗖 Mini-Ansicht umschalten \n\n"
         "• ➕ Profil: Neues Textprofil erstellen.\n"
         "• 🖊️ Im Bearbeitungsmodus zwischen Profilen wechseln.\n"
         "• ❌ Löschen: Profil entfernen.\n\n"
