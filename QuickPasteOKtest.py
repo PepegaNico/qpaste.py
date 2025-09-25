@@ -1935,6 +1935,7 @@ def update_ui():
             return max(1, int(value * app_state.zoom_level))
 
         combo = QtWidgets.QComboBox()
+        combo.setStyle(ComboArrowGlyphStyle(combo.style()))
         combo.setEditable(app_state.edit_mode)
         combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         combo.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
@@ -1969,8 +1970,6 @@ def update_ui():
                 margin:0; padding:0;
             }}
 
-            /* Wir zeichnen den Emoji-Pfeil selbst → Default-Pfeil abschalten */
-            QComboBox::down-arrow {{ image: none; }}
 
             QComboBox QAbstractItemView {{
                 background:{ebg};
