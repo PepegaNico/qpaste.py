@@ -71,11 +71,18 @@ class ComboBoxItemProxy:
         self._index = index
 
     def text(self):
+        if self._combo_box.isEditable() and self._combo_box.currentIndex() == self._index:
+            line_edit = self._combo_box.lineEdit()
+            if line_edit is not None:
+                return line_edit.text()
         return self._combo_box.itemText(self._index)
 
     def setText(self, value):
+        if self._combo_box.currentIndex() == self._index and self._combo_box.isEditable():
+            line_edit = self._combo_box.lineEdit()
+            if line_edit is not None:
+                line_edit.setText(value)
         self._combo_box.setItemText(self._index, value)
-
 
 class ProfileComboBox(QtWidgets.QComboBox):
     """ComboBox mit intern gerendertem Pfeil-Glyph."""
@@ -317,7 +324,17 @@ app_state.active_profile = app_state.data.get("active_profile", list(app_state.d
 def has_field_changes(profile_to_check=None):
     if profile_to_check is None:
         profile_to_check = app_state.active_profile
+
+    if app_state.profile_entries:
+        for old_name, entry in app_state.profile_entries.items():
+            if old_name == "SDE":
+                continue
+            new_name = (entry.text() or "").strip()
+            if new_name != old_name:
+                return True
+
     prof = app_state.data["profiles"][profile_to_check]
+
     titles, texts, hks = [], [], []
     for i in range(entries_layout.count()):
         item = entries_layout.itemAt(i)
@@ -335,54 +352,84 @@ def has_field_changes(profile_to_check=None):
          or texts  != prof["texts"]
          or hks    != prof["hotkeys"])
 
-def save_profile_names():
-    # Nur in Edit-Mode und wenn es Eingabefelder gibt
-    if not app_state.edit_mode or not app_state.profile_entries:
-        return
 
-    # Geplante Umbenennungen einsammeln
+def apply_profile_renames(show_errors=True):
+    """Überträgt Umbenennungen aus der UI in die Datenstruktur."""
+    if not app_state.edit_mode or not app_state.profile_entries:
+        return False
+
     proposed = {}
-    for old_name, line_edit in app_state.profile_entries.items():
+    proposed_lower = set()
+    for old_name, entry in app_state.profile_entries.items():
         if old_name == "SDE":
-            continue  # reserviert
-        new_name = (line_edit.text() or "").strip()
+            continue
+        new_name = (entry.text() or "").strip()
 
         if not new_name:
-            show_critical_message("Fehler", f"Profilname für '{old_name}' darf nicht leer sein.")
-            return
+            if show_errors:
+                show_critical_message("Fehler", f"Profilname für '{old_name}' darf nicht leer sein.")
+            return None
         if new_name == "SDE":
-            show_critical_message("Fehler", "Der Profilname 'SDE' ist reserviert.")
-            return
+            if show_errors:
+                show_critical_message("Fehler", "Der Profilname 'SDE' ist reserviert.")
+            return None
+        lower_name = new_name.lower()
+        if lower_name in proposed_lower:
+            if show_errors:
+                show_critical_message("Fehler", f"Profilname '{new_name}' ist doppelt.")
+            return None
 
-        # Duplikate innerhalb der Eingaben verhindern
-        if new_name in proposed.values():
-            show_critical_message("Fehler", f"Profilname '{new_name}' ist doppelt.")
-            return
+        existing_lower = {
+            n.lower()
+            for n in app_state.data["profiles"].keys()
+            if n not in (old_name, "SDE")
+        }
+        if lower_name in existing_lower:
+            if show_errors:
+                show_critical_message("Fehler", f"Profilname '{new_name}' existiert bereits.")
+            return None
 
-        # Kollision mit bestehenden Profilen (außer man behält den gleichen Namen)
-        if new_name in app_state.data["profiles"] and new_name != old_name:
-            show_critical_message("Fehler", f"Profilname '{new_name}' existiert bereits.")
-            return
+        if new_name != old_name:
+            proposed[old_name] = new_name
+            proposed_lower.add(lower_name)
 
-        proposed[old_name] = new_name
+    if not proposed:
+        return False
 
-    # Umbenennungen anwenden
     new_profiles = {}
     for old_name, prof_data in app_state.data["profiles"].items():
         if old_name == "SDE":
-            new_profiles["SDE"] = prof_data
             continue
         target = proposed.get(old_name, old_name)
         new_profiles[target] = prof_data
 
-    # Aktives Profil aktualisieren, falls umbenannt
+    if len(new_profiles) > 11:
+        if show_errors:
+            show_critical_message("Limit erreicht", "Maximal 10 Profile erlaubt!")
+        return None
+
+    sde_profile = None
+    if "SDE" in app_state.data["profiles"]:
+        sde_profile = load_sde_profile()
+        new_profiles["SDE"] = sde_profile
+
     if app_state.active_profile in proposed:
         app_state.active_profile = proposed[app_state.active_profile]
+
+    if sde_profile is not None and app_state.active_profile not in new_profiles:
+        app_state.active_profile = next((k for k in new_profiles.keys() if k != "SDE"), "SDE")
+
     app_state.data["profiles"] = new_profiles
     app_state.data["active_profile"] = app_state.active_profile
+    return True
 
-    # Persistieren (debounced)
-    profiles_to_save = {k: v for k, v in new_profiles.items() if k != "SDE"}
+
+def save_profile_names():
+    result = apply_profile_renames(show_errors=True)
+    if result is None or result is False:
+        return
+
+    profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
     debounced_saver.schedule_save({
         "profiles": profiles_to_save,
         "active_profile": app_state.active_profile
@@ -390,7 +437,7 @@ def save_profile_names():
 
     update_ui()
     update_profile_buttons()
-
+    refresh_tray()
 
 def update_profile_buttons():
     combo = getattr(app_state, "profile_selector", None)
@@ -1294,35 +1341,8 @@ def toggle_edit_mode():
 def save_data(stay_in_edit_mode=False):
     try:
         if app_state.edit_mode and app_state.profile_entries:
-            updated_profiles = {}
-            new_active_profile = app_state.active_profile
-            for old_name, entry in app_state.profile_entries.items():
-                new_name = entry.text().strip()
-                if old_name == "SDE" or new_name == "SDE":
-                    continue
-                if new_name and new_name != old_name:
-                    existing_lower = {n.lower() for n in app_state.data["profiles"].keys()
-                                    if n not in (old_name, "SDE")}
-                    if new_name.lower() in existing_lower:
-                        show_critical_message("Fehler", f"Profilname '{new_name}' existiert bereits!")
-                        return
-                    updated_profiles[new_name] = app_state.data["profiles"].pop(old_name)
-
-                    if app_state.active_profile == old_name:
-                        new_active_profile = new_name
-                else:
-                    updated_profiles[old_name] = app_state.data["profiles"][old_name]
-            app_state.data["profiles"] = updated_profiles
-            sde = load_sde_profile()
-            app_state.data["profiles"]["SDE"] = sde
-            available_profiles = {**updated_profiles, "SDE": sde}
-
-            if new_active_profile in available_profiles:
-                app_state.active_profile = new_active_profile
-            else:
-                app_state.active_profile = list(available_profiles.keys())[0]
-            if len(updated_profiles) > 11:
-                show_critical_message("Limit erreicht", "Maximal 10 Profile erlaubt!")
+            rename_result = apply_profile_renames(show_errors=True)
+            if rename_result is None:
                 return
             app_state.data["active_profile"] = app_state.active_profile
         if app_state.active_profile != "SDE":
