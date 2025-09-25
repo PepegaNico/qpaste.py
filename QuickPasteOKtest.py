@@ -1166,11 +1166,11 @@ def create_tray_icon():
         menu.addSeparator()
         
         # Standard-Actions
-        act_show = QAction("↑ Öffnen", win)
+        act_show = QAction("Öffnen", win)
         act_show.triggered.connect(lambda: (win.show(), win.raise_(), win.activateWindow()))
         menu.addAction(act_show)
         
-        act_quit = QAction("✖ Beenden", win)
+        act_quit = QAction("Beenden", win)
         act_quit.triggered.connect(lambda: (save_window_position(), app.quit()))
         menu.addAction(act_quit)
         
