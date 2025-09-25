@@ -23,9 +23,9 @@ logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format=
 BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "H.ico")
 
-DEFAULT_FONT_SIZE = 9  # Basis-Schriftgröße
-MIN_FONT_SIZE = 9
-MAX_FONT_SIZE = 9
+DEFAULT_FONT_SIZE = 5  # Basis-Schriftgröße
+MIN_FONT_SIZE = 5
+MAX_FONT_SIZE = 5
 
 class QuickPasteState:
     """Centralized application state management"""
@@ -58,7 +58,7 @@ class QuickPasteState:
 
         # VEREINFACHTE Font-Verwaltung
         self.zoom_level = 1.0  # 75% bis 150%
-        self.base_font_size = 9  # Basis-Größe
+        self.base_font_size = 5  # Basis-Größe
 
 # Global application state
 app_state = QuickPasteState()
@@ -170,14 +170,13 @@ debounced_saver = DebouncedSaver(600)
 #region window position 
 
 def save_window_position():
-    """Speichert Fensterposition und Zoom-Level"""
+    """Speichert Fensterposition und weitere UI-Einstellungen"""
     try:
         geo_bytes = win.saveGeometry()
         geo_hex = bytes(geo_bytes.toHex()).decode()
         cfg = {
             "geometry_hex": geo_hex,
             "dark_mode": app_state.dark_mode,
-            "zoom_level": app_state.zoom_level,  # Zoom speichern
             "mini_mode": app_state.mini_mode
         }
         if app_state.saved_geometry is not None:
@@ -192,7 +191,7 @@ def save_window_position():
         logging.exception(f"⚠ Fehler beim Speichern der Fensterposition: {e}")
 
 def load_window_position():
-    """Lädt Fensterposition und Zoom-Level"""
+    """Lädt Fensterposition und andere UI-Einstellungen"""
     try:
         with open(WINDOW_CONFIG, "r", encoding="utf-8") as f:
             cfg = json.load(f)
@@ -203,12 +202,8 @@ def load_window_position():
         if cfg.get("mini_mode") is not None:
             app_state.mini_mode = cfg["mini_mode"]
 
-        # Zoom laden (mit Limits)
-        if cfg.get("zoom_level") is not None:
-            app_state.zoom_level = max(0.75, min(1.5, cfg["zoom_level"]))
-        else:
-            # Erste Nutzung: Auto-DPI Detection
-            app_state.zoom_level = detect_optimal_zoom()
+        # Zoom wird nicht mehr aus der Konfiguration geladen – immer automatische DPI-Erkennung
+        app_state.zoom_level = detect_optimal_zoom()
 
         hexstr = cfg.get("geometry_hex")
         if hexstr:
@@ -1387,110 +1382,20 @@ def confirm_and_then(action_if_yes):
 #region zoom
 
 
-# 3. ZENTRALE ZOOM-FUNKTION
-def apply_zoom(z):
-    # Begrenzung: 75% .. 125%
-    z = max(0.75, min(1.25, z))
-    app_state.zoom_level = z
-
-    base = DEFAULT_FONT_SIZE          # z. B. 10/11
-    font_size = max(8, int(round(base * z)))
+def apply_auto_dpi_scaling():
+    """Passt die globale Schriftgröße anhand der erkannten DPI an."""
+    app_state.zoom_level = detect_optimal_zoom()
 
     app = QtWidgets.QApplication.instance()
     if not app:
         return
 
-    # Globale Schrift setzen (alle Widgets übernehmen)
-    f = app.font()
-    f.setPointSize(font_size)
-    app.setFont(f)
+    font_size = max(8, int(round(DEFAULT_FONT_SIZE * app_state.zoom_level)))
+
+    font = app.font()
+    font.setPointSize(font_size)
+    app.setFont(font)
     app.setStyleSheet(f"* {{ font-size: {font_size}pt; }}")
-
-    # KEIN update_ui() hier! Nur leichte Auffrischung der sichtbaren Buttons:
-    refresh_visible_button_texts()
-
-def refresh_visible_button_texts():
-    # Findet alle Text-Buttons und triggert deren lokalen Update-Callback
-    app = QtWidgets.QApplication.instance()
-    win = next((w for w in app.topLevelWidgets() if isinstance(w, QtWidgets.QMainWindow)), None)
-    if not win:
-        return
-    for btn in win.findChildren(QtWidgets.QPushButton, "qp_text_btn"):
-        if hasattr(btn, "_update_text"):
-            t = QtCore.QTimer(btn)            # parenten → sicher
-            t.setSingleShot(True)
-            t.timeout.connect(btn._update_text)
-            t.start(0)
-
-
-def update_widget_sizes():
-    """Passt feste Widget-Größen an Zoom an"""
-    # Basis-Größen
-    base_title_width = 120
-    base_hotkey_width = 120
-    base_row_height = 40
-    base_text_edit_height = 80
-    
-    # Skalierte Größen
-    title_width = int(base_title_width * app_state.zoom_level)
-    hotkey_width = int(base_hotkey_width * app_state.zoom_level)
-    row_height = int(base_row_height * app_state.zoom_level)
-    text_edit_height = int(base_text_edit_height * app_state.zoom_level)
-    
-    # Titel-Labels/Inputs
-    for widget in win.findChildren(QtWidgets.QLabel):
-        if widget.objectName() != "drag_handle" and widget.width() == 120:
-            widget.setFixedWidth(title_width)
-            widget.setFixedHeight(row_height)
-    
-    for widget in win.findChildren(QtWidgets.QLineEdit):
-        if widget.width() == 120:
-            widget.setFixedWidth(title_width if "titel" in widget.text().lower() else hotkey_width)
-    
-    # Text-Edits im Edit-Mode
-    for widget in win.findChildren(QtWidgets.QTextEdit):
-        widget.setMaximumHeight(text_edit_height)
-        widget.setMinimumHeight(int(text_edit_height * 0.75))
-    
-    # Buttons
-    for widget in win.findChildren(QtWidgets.QPushButton):
-        if hasattr(widget, 'toolTip') and "Klicken zum Kopieren" in widget.toolTip():
-            widget.setFixedHeight(row_height)
-
-# 4. MAUSRAD-EVENT HANDLER
-class WheelEventFilter(QtCore.QObject):
-    def eventFilter(self, obj, event):
-        if event.type() != QtCore.QEvent.Wheel:
-            return False
-
-        mods = QtWidgets.QApplication.keyboardModifiers()
-        if not (mods & QtCore.Qt.ControlModifier):
-            return False
-
-        # Wenn gerade (noch) ein Zoom-Rebuild aussteht oder läuft → nur Timer neu starten, nichts weiteres
-        if getattr(app_state, "is_rebuilding", False) or (
-            getattr(app_state, "scale_timer", None) and app_state.scale_timer.isActive()
-        ):
-            if app_state.scale_timer:
-                app_state.scale_timer.start(50)
-            return True
-
-        # Delta robust ermitteln
-        delta = 0
-        if hasattr(event, "angleDelta"):
-            ad = event.angleDelta()
-            if ad:
-                delta = ad.y() or ad.x() or 0
-        if delta == 0 and hasattr(event, "pixelDelta"):
-            pd = event.pixelDelta()
-            if pd:
-                delta = pd.y() or pd.x() or 0
-        if delta == 0:
-            return False
-
-        step = 0.05
-        apply_zoom(app_state.zoom_level + (step if delta > 0 else -step))
-        return True
 
 
 # 5. TEXT-BUTTON FUNKTIONEN
@@ -1602,65 +1507,6 @@ def create_text_button(i, texts, hks, ebg, fg):
         t.start(ms)
     return text_btn
 
-def update_text_buttons():
-    """Aktualisiert alle Text-Buttons nach Zoom-Änderung"""
-    try:
-        for button in win.findChildren(QtWidgets.QPushButton):
-            if hasattr(button, 'toolTip') and "Klicken zum Kopieren" in button.toolTip():
-                # Trigger resize event für Text-Update
-                button.resize(button.size())
-    except Exception as e:
-        logging.warning(f"Text button update failed: {e}")
-
-# 6. ZOOM-SLIDER (Optional - unten rechts)
-def create_zoom_controls():
-    """Erstellt Zoom-Controls in der Statusbar"""
-    try:
-        statusbar = win.statusBar()
-        
-        # Container Widget
-        zoom_widget = QtWidgets.QWidget()
-        layout = QtWidgets.QHBoxLayout(zoom_widget)
-        layout.setContentsMargins(0, 0, 5, 0)
-        layout.setSpacing(5)
-        
-        # Reset-Button
-        reset_btn = QtWidgets.QPushButton("↺")
-        reset_btn.setFixedSize(20, 20)
-        reset_btn.setToolTip("Zoom auf Auto-DPI zurücksetzen")
-        reset_btn.clicked.connect(lambda: apply_zoom(detect_optimal_zoom()))
-        
-        # Zoom-Label
-        zoom_label = QtWidgets.QLabel()
-        def update_label():
-            zoom_label.setText(f"Zoom: {int(app_state.zoom_level * 100)}%")
-        update_label()
-        
-        # Zoom Buttons
-        zoom_out = QtWidgets.QPushButton("-")
-        zoom_out.setFixedSize(20, 20)
-        zoom_out.clicked.connect(lambda: apply_zoom(app_state.zoom_level - 0.05))
-        
-        zoom_in = QtWidgets.QPushButton("+")
-        zoom_in.setFixedSize(20, 20)
-        zoom_in.clicked.connect(lambda: apply_zoom(app_state.zoom_level + 0.05))
-        
-        # Layout
-        layout.addWidget(reset_btn)
-        layout.addWidget(zoom_out)
-        layout.addWidget(zoom_label)
-        layout.addWidget(zoom_in)
-        
-        # In Statusbar einfügen
-        statusbar.addPermanentWidget(zoom_widget)
-        
-        # Update-Funktion registrieren
-        zoom_widget.update_label = update_label
-        win._zoom_widget = zoom_widget
-        
-    except Exception as e:
-        logging.error(f"Failed to create zoom controls: {e}")
-
 # 7. APP INITIALISIERUNG ANPASSEN
 def initialize_application():
     """Initialisiert die Anwendung mit korrektem Scaling"""
@@ -1680,17 +1526,6 @@ def initialize_application():
     return app
 
 
-
-def install_font_scaling_globally():
-    app = QtWidgets.QApplication.instance()
-    if app is None:
-        return
-    if not hasattr(app, "_global_wheel_filter"):
-        f = WheelEventFilter()
-        app.installEventFilter(f)
-        app._global_wheel_filter = f
-
-
 #endregion
 
 #region Hauptfenster
@@ -1701,8 +1536,9 @@ if sys.platform.startswith("win"):
 win = QtWidgets.QMainWindow()
 
 def setup_window_scaling():
-    # beim Start auf den gespeicherten Zoom gehen – aber erst NACH UI-Aufbau
-    QtCore.QTimer.singleShot(0, lambda: apply_zoom(app_state.zoom_level))
+    # Anwender-Zoom wird nicht mehr gespeichert – automatische DPI-Anpassung nach dem UI-Aufbau
+    QtCore.QTimer.singleShot(0, apply_auto_dpi_scaling)
+
 
 win.setWindowTitle("QuickPaste")
 win.setMinimumSize(399, 100)
@@ -1736,8 +1572,6 @@ entries_layout.setAlignment(QtCore.Qt.AlignTop)
 entries_layout.setSpacing(6)
 entries_layout.setContentsMargins(8, 8, 8, 8)
 scroll_area.setWidget(container)
-QtCore.QTimer.singleShot(0, install_font_scaling_globally)
-
 
 
 
@@ -1928,7 +1762,7 @@ def update_ui():
         combo.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         combo_height = scaled(24 if app_state.mini_mode else 32)
         combo.setFixedHeight(combo_height)
-        combo.setMinimumWidth(scaled(130 if app_state.mini_mode else 200))
+        combo.setMinimumWidth(scaled(50 if app_state.mini_mode else 50))
         radius = scaled(7 if app_state.mini_mode else 11)
         padding_v = scaled(3 if app_state.mini_mode else 6)
         padding_h = scaled(8 if app_state.mini_mode else 14)
@@ -2544,6 +2378,5 @@ create_tray_icon()
 register_hotkeys()
 win.show()
 setup_window_scaling()
-QtCore.QTimer.singleShot(0, install_font_scaling_globally)
 
 sys.exit(app.exec_())
