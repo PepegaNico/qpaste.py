@@ -1543,11 +1543,11 @@ def update_ui():
             delete_btn.setStyleSheet(
                 f"""
                 QPushButton {{
-                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
+                    background:{bbg}; color:{fg};
                     color:white;
                     border: 1px solid #b71c1c;
                     border-radius: {radius}px;}}  
-                QPushButton:hover {{background:#f44336;}}
+                QPushButton:hover {{background: {'#666'};}}
                 QPushButton:pressed {{background:#b71c1c;}}""")
             delete_btn.setToolTip("Ausgewähltes Profil löschen")
             selector_layout.addWidget(delete_btn)
@@ -1827,14 +1827,17 @@ def update_ui():
             hl.addWidget(eh)
             app_state.hotkey_entries.append(eh)
             delete_btn = QtWidgets.QPushButton("❌")
-            delete_btn.setFixedSize(20, 20)
+            delete_size = int(38 * app_state.zoom_level)
+            delete_btn.setFixedSize(delete_size, delete_size)
             delete_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'}; 
-                    color: white; 
-                    border: 1px solid #b71c1c;
-                    border-radius: 3px;}}
-                QPushButton:hover {{ background: #f44336; }}""")
+                    background: {ebg};
+                    color: {fg};
+                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
+                    border-radius: 6px;
+                    padding: 8px;}}
+                QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}
+                QPushButton:pressed {{background: {'#3a3a3a' if app_state.dark_mode else '#e0e0e0'};}}""")
             delete_btn.clicked.connect(lambda _, j=i: delete_entry(j))
             delete_btn.setToolTip("Eintrag löschen")
             hl.addWidget(delete_btn)
@@ -1856,11 +1859,36 @@ def update_ui():
         bl = QtWidgets.QHBoxLayout(bw)
         bl.setContentsMargins(0,0,0,0)
         bs = QtWidgets.QPushButton("💾 Speichern")
-        bs.setStyleSheet("background:green;color:white;")
+        button_border_color = '#555' if app_state.dark_mode else '#ccc'
+        button_hover_bg = '#4a4a4a' if app_state.dark_mode else '#f0f0f0'
+        button_min_height = int(40 * app_state.zoom_level)
+        bs.setMinimumHeight(button_min_height)
+        bs.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: #2e7d32;
+                color: white;
+                border: 1px solid {button_border_color};
+                border-radius: 6px;
+                padding: 8px 12px;
+                min-height: {button_min_height}px;}}
+            QPushButton:hover {{background: #388e3c;}}"""
+        )
         bs.clicked.connect(save_data)
         bl.addWidget(bs)
         ba = QtWidgets.QPushButton("➕ Eintrag hinzufügen")
-        ba.setStyleSheet(f"background:{bbg}; color:{fg};")
+        ba.setMinimumHeight(button_min_height)
+        ba.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: {bbg};
+                color: {fg};
+                border: 1px solid {button_border_color};
+                border-radius: 6px;
+                padding: 8px 12px;
+                min-height: {button_min_height}px;}}
+            QPushButton:hover {{background: {button_hover_bg};}}"""
+        )
         ba.clicked.connect(add_new_entry)
         bl.addWidget(ba)
         entries_layout.addWidget(bw)
