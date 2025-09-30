@@ -1103,6 +1103,7 @@ def move_entry_to(old_index, new_index):
 
 def toggle_edit_mode():
     if app_state.edit_mode:
+        restored_from_snapshot = False
         if has_field_changes():
             resp = show_question_message(
                 "Ungespeicherte Änderungen",
@@ -1110,10 +1111,37 @@ def toggle_edit_mode():
             if resp == QtWidgets.QMessageBox.Yes:
                 save_data()
             else:
+                if app_state.last_ui_data is not None:
+                    try:
+                        restored_profiles = copy.deepcopy(app_state.last_ui_data)
+                    except Exception:
+                        restored_profiles = None
+                    if restored_profiles is not None:
+                        app_state.data["profiles"] = restored_profiles
+                        active_profile = app_state.data.get("active_profile")
+                        if active_profile not in restored_profiles:
+                            fallback = None
+                            if app_state.active_profile in restored_profiles:
+                                fallback = app_state.active_profile
+                            if fallback is None:
+                                fallback = next((name for name in restored_profiles.keys() if name != "SDE"), None)
+                            if fallback is None and restored_profiles:
+                                fallback = next(iter(restored_profiles.keys()))
+                            if fallback is not None:
+                                app_state.active_profile = fallback
+                                app_state.data["active_profile"] = fallback
+                        else:
+                            app_state.active_profile = active_profile
+                        restored_from_snapshot = True
                 reset_unsaved_changes()
+        else:
+            reset_unsaved_changes()
         app_state.edit_mode = False
-        app_state.last_ui_data = None
         update_ui()
+        if restored_from_snapshot:
+            register_hotkeys()
+            refresh_tray()
+        app_state.last_ui_data = None
         return
     is_sde_only = len(app_state.data["profiles"]) == 1 and "SDE" in app_state.data["profiles"]
     if app_state.active_profile == "SDE" and not is_sde_only:
@@ -1615,16 +1643,13 @@ def update_ui():
                 QPushButton {{
                     background:{bbg}; color:{fg};
                     color:white;
-                    border: 1px solid #b71c1c;
+                    border: 1px;
                     border-radius: {radius}px;}}  
                 QPushButton:hover {{background: {'#666'};}}
                 QPushButton:pressed {{background:#b71c1c;}}""")
             delete_btn.setToolTip("Ausgewähltes Profil löschen")
             selector_layout.addWidget(delete_btn)
             app_state.profile_delete_button = delete_btn
-
-
-
 
         toolbar.addWidget(selector_container)
         for name in profile_names:
