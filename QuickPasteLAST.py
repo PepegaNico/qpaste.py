@@ -1588,14 +1588,17 @@ def update_ui():
         profile_names.append(profile_name)
     if not app_state.edit_mode and "SDE" in app_state.data["profiles"]:
         profile_names.append("SDE")
+    def scaled(value):
+        return max(1, int(value * app_state.zoom_level))
+
+    selector_spacing = scaled(1 if app_state.mini_mode else 3)
+
     if profile_names:
         selector_container = QtWidgets.QWidget()
         selector_container.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         selector_layout = QtWidgets.QHBoxLayout(selector_container)
         selector_layout.setContentsMargins(0, 0, 0, 0)
-        selector_layout.setSpacing(1 if app_state.mini_mode else 3)
-        def scaled(value):
-            return max(1, int(value * app_state.zoom_level))
+        selector_layout.setSpacing(selector_spacing)
         
         combo = ProfileComboBox()
         combo.setEditable(app_state.edit_mode)
@@ -1720,10 +1723,17 @@ def update_ui():
                 background:{bbg}; color:{fg};
                 border: 1px solid {border_color};
                 border-radius: 5px;
-                padding: 6px 16px;
-                margin-left: 8px;}}  
+                padding: 6px 16px;}}
             QPushButton:hover {{background:#666;}}""")
         ap.clicked.connect(add_new_profile)
+        if profile_names:
+            add_spacing = getattr(toolbar, "addSpacing", None)
+            if callable(add_spacing):
+                add_spacing(selector_spacing)
+            else:
+                layout = toolbar.layout()
+                if layout is not None:
+                    layout.addSpacing(selector_spacing)
         toolbar.addWidget(ap)
         
     spacer = QtWidgets.QWidget()
