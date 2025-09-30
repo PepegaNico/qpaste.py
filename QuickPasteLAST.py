@@ -1,4 +1,4 @@
-import sys, os, json, re, ctypes, logging
+import sys, os, json, re, ctypes, logging, copy
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QFontMetrics
@@ -292,28 +292,26 @@ def _normalize_title(value):
     return (value or "").strip()
 def _normalize_hotkey(value):
     return (value or "").strip().lower()
-def _normalize_rich_text(value):
-    """Normalize rich-text HTML for reliable comparisons."""
-    doc = QtGui.QTextDocument()
-    doc.setHtml(value or "")
-    return doc.toHtml()
-def _normalize_title(value):
-    return (value or "").strip()
-def _normalize_hotkey(value):
-    return (value or "").strip().lower()
 def has_field_changes(profile_to_check=None):
     if profile_to_check is None:
         profile_to_check = app_state.active_profile
-    if profile_to_check not in app_state.data["profiles"]:
+    profiles = app_state.data.get("profiles", {})
+    if profile_to_check not in profiles:
         return False
+
+    rename_changed = False
     if app_state.profile_entries:
         for old_name, entry in app_state.profile_entries.items():
             if old_name == "SDE":
                 continue
-            new_name = _normalize_title(entry.text())
+            try:
+                new_name = _normalize_title(entry.text())
+            except Exception:
+                new_name = _normalize_title(getattr(entry, "text", lambda: "")())
             if new_name != _normalize_title(old_name):
-                return True
-    prof = app_state.data["profiles"][profile_to_check]
+                rename_changed = True
+                break
+
     titles, texts, hks = [], [], []
     for i in range(entries_layout.count()):
         item = entries_layout.itemAt(i)
@@ -327,16 +325,40 @@ def has_field_changes(profile_to_check=None):
                 titles.append(line_edits[0].text())
                 texts.append(text_edits[0].toHtml())
                 hks.append(line_edits[1].text())
+
     normalized_titles = [_normalize_title(t) for t in titles]
     normalized_texts = [_normalize_rich_text(t) for t in texts]
     normalized_hotkeys = [_normalize_hotkey(h) for h in hks]
-    stored_titles = [_normalize_title(t) for t in prof.get("titles", [])]
-    stored_texts = [_normalize_rich_text(t) for t in prof.get("texts", [])]
-    stored_hotkeys = [_normalize_hotkey(h) for h in prof.get("hotkeys", [])]
-    return (
+
+    reference_profiles = app_state.last_ui_data if isinstance(app_state.last_ui_data, dict) else None
+    reference_profile = None
+    if reference_profiles is not None:
+        reference_profile = reference_profiles.get(profile_to_check)
+    if reference_profile is None:
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                persisted = json.load(f)
+            reference_profile = persisted.get("profiles", {}).get(profile_to_check)
+        except (FileNotFoundError, json.JSONDecodeError):
+            reference_profile = None
+    if reference_profile is None:
+        reference_profile = {}
+
+    stored_titles = [_normalize_title(t) for t in reference_profile.get("titles", [])]
+    stored_texts = [_normalize_rich_text(t) for t in reference_profile.get("texts", [])]
+    stored_hotkeys = [_normalize_hotkey(h) for h in reference_profile.get("hotkeys", [])]
+
+    fields_changed = (
         normalized_titles != stored_titles
         or normalized_texts != stored_texts
         or normalized_hotkeys != stored_hotkeys)
+
+    changed = rename_changed or fields_changed
+    if not changed:
+        app_state.unsaved_changes = False
+        return False
+    app_state.unsaved_changes = True
+    return True
 
 def apply_profile_renames(show_errors=True):
     """Überträgt Umbenennungen aus der UI in die Datenstruktur."""
@@ -444,31 +466,7 @@ def update_profile_buttons():
             and data not in (None, "SDE"))
         delete_btn.setEnabled(can_delete)
 
-def validate_profile_data(titles, texts, hotkeys):
-    """Validate and synchronize profile data arrays"""
-    max_length = max(len(titles), len(texts), len(hotkeys))
-    titles = titles + [f"Titel {i+1}" for i in range(len(titles), max_length)]
-    texts = texts + [f"Text {i+1}" for i in range(len(texts), max_length)]
-    hotkeys = hotkeys + [f"ctrl+shift+{i+1}" for i in range(len(hotkeys), max_length)]
-    erlaubte_zeichen = set("1234567890befhmpqvxz§'^")
-    validated_hotkeys = []
-    for i, hotkey in enumerate(hotkeys):
-        hotkey = hotkey.strip().lower()
-        parts = hotkey.split("+")
-        if (len(parts) != 3 or 
-            parts[0] != "ctrl" or 
-            parts[1] != "shift" or 
-            parts[2] not in erlaubte_zeichen):
-            for char in erlaubte_zeichen:
-                test_hotkey = f"ctrl+shift+{char}"
-                if test_hotkey not in validated_hotkeys:
-                    validated_hotkeys.append(test_hotkey)
-                    break
-            else:
-                validated_hotkeys.append(f"ctrl+shift+{i+1}")
-        else:
-            validated_hotkeys.append(hotkey)
-    return titles, texts, validated_hotkeys
+
 def switch_profile(profile_name):
     if profile_name == app_state.active_profile:
         return
@@ -1114,12 +1112,18 @@ def toggle_edit_mode():
             else:
                 reset_unsaved_changes()
         app_state.edit_mode = False
+        app_state.last_ui_data = None
         update_ui()
         return
     is_sde_only = len(app_state.data["profiles"]) == 1 and "SDE" in app_state.data["profiles"]
     if app_state.active_profile == "SDE" and not is_sde_only:
         show_information_message("Nicht editierbar", "Das SDE-Profil kann nicht bearbeitet werden.")
         return
+    try:
+        app_state.last_ui_data = copy.deepcopy(app_state.data.get("profiles", {}))
+    except Exception:
+        app_state.last_ui_data = None
+    app_state.unsaved_changes = False
     app_state.edit_mode = True
     update_ui()
 
@@ -1151,6 +1155,10 @@ def save_data(stay_in_edit_mode=False):
         profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
         debounced_saver.schedule_save({"profiles": profiles_to_save, "active_profile": app_state.data["active_profile"]})
         fehlerhafte_hotkeys = register_hotkeys()
+        try:
+            app_state.last_ui_data = copy.deepcopy(app_state.data.get("profiles", {}))
+        except Exception:
+            app_state.last_ui_data = None
         reset_unsaved_changes()
         update_ui()
         if not fehlerhafte_hotkeys and not stay_in_edit_mode:
@@ -1813,18 +1821,22 @@ def update_ui():
             et.setStyleSheet(f"background:{ebg}; color:{fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;")
             def validate_and_set_title(idx, widget):
                 new_title = (widget.text() or "").strip()
+                profile = app_state.data["profiles"].get(app_state.active_profile, {})
+                titles_list = profile.get("titles", [])
+                old = titles_list[idx] if idx < len(titles_list) else ""
                 if not new_title:
                     show_critical_message("Fehler", "Titel darf nicht leer sein!")
-                    old = app_state.data["profiles"][app_state.active_profile]["titles"][idx]
                     widget.setText(old)
                     return
                 current_titles = [e.text().strip().lower() for j, e in enumerate(app_state.title_entries) if j != idx]
                 if new_title.lower() in current_titles:
                     show_critical_message("Fehler", f"Titel '{new_title}' wird bereits verwendet!")
-                    old = app_state.data["profiles"][app_state.active_profile]["titles"][idx]
                     widget.setText(old)
                     return
+                if new_title == old:
+                    return
                 app_state.data["profiles"][app_state.active_profile]["titles"][idx] = new_title
+                app_state.unsaved_changes = True
             et.editingFinished.connect(partial(validate_and_set_title, i, et))
             hl.addWidget(et)
             app_state.title_entries.append(et)
@@ -1851,7 +1863,13 @@ def update_ui():
             ex.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
             ex.customContextMenuRequested.connect(lambda pos, w=ex: show_text_context_menu(pos, w))
             def update_text(widget, index):
-                app_state.data["profiles"][app_state.active_profile]["texts"][index] = widget.toHtml()
+                new_html = widget.toHtml()
+                texts_list = app_state.data["profiles"][app_state.active_profile]["texts"]
+                old_html = texts_list[index] if index < len(texts_list) else None
+                if new_html == old_html:
+                    return
+                texts_list[index] = new_html
+                app_state.unsaved_changes = True
             ex.textChanged.connect(partial(update_text, ex, i))
             hl.addWidget(ex, 1)
             app_state.text_entries.append(ex)
@@ -1871,7 +1889,7 @@ def update_ui():
                         parts[1] != "shift" or 
                         parts[2] not in erlaubte_zeichen):
                         show_critical_message(
-                            "Fehler", 
+                            "Fehler",
                             f"Ungültiger Hotkey \"{widget.text()}\" für Eintrag {idx+1}.\n"
                             f"Erlaubte Zeichen: {erlaubte_zeichen}\n"
                             f"Format: ctrl+shift+[zeichen]")
@@ -1880,11 +1898,16 @@ def update_ui():
                     current_hotkeys = [entry.text().strip().lower() for j, entry in enumerate(app_state.hotkey_entries) if j != idx]
                     if hotkey in current_hotkeys:
                         show_critical_message(
-                            "Fehler", 
+                            "Fehler",
                             f"Hotkey \"{widget.text()}\" wird bereits in diesem Profil verwendet!")
                         widget.setText(hks[idx])
                         return
+                current_list = app_state.data["profiles"][app_state.active_profile]["hotkeys"]
+                old_hotkey = current_list[idx] if idx < len(current_list) else ""
+                if widget.text() == old_hotkey:
+                    return
                 app_state.data["profiles"][app_state.active_profile]["hotkeys"][idx] = widget.text()
+                app_state.unsaved_changes = True
             eh.editingFinished.connect(partial(validate_and_set_hotkey, idx=i, widget=eh))
             hl.addWidget(eh)
             app_state.hotkey_entries.append(eh)
