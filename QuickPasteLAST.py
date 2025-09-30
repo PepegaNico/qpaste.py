@@ -1651,7 +1651,7 @@ def update_ui():
         delete_btn = None
         if app_state.edit_mode:
             delete_btn = QtWidgets.QPushButton("❌")
-            btn_size = scaled(24 if app_state.mini_mode else 32)  # GEÄNDERT: Gleiche Höhe wie Combo
+            btn_size = scaled(32) 
             delete_btn.setFixedSize(btn_size, btn_size)
             delete_btn.setStyleSheet(
                 f"""
@@ -1731,9 +1731,13 @@ def update_ui():
             if callable(add_spacing):
                 add_spacing(selector_spacing)
             else:
-                layout = toolbar.layout()
-                if layout is not None:
-                    layout.addSpacing(selector_spacing)
+                spacer = QtWidgets.QWidget()
+                spacer.setFixedWidth(selector_spacing)
+                spacer.setSizePolicy(
+                    QtWidgets.QSizePolicy.Fixed,
+                    QtWidgets.QSizePolicy.Preferred,
+                )
+                toolbar.addWidget(spacer)
         toolbar.addWidget(ap)
         
     spacer = QtWidgets.QWidget()
