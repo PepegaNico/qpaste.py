@@ -187,13 +187,25 @@ def load_window_position():
             cfg = json.load(f)
         if cfg.get("dark_mode") is not None:
             app_state.dark_mode = cfg["dark_mode"]
-        if cfg.get("mini_mode") is not None:
-            app_state.mini_mode = cfg["mini_mode"]
+        mini_mode_cfg = cfg.get("mini_mode")
+        if mini_mode_cfg is not None:
+            app_state.mini_mode = mini_mode_cfg
         app_state.zoom_level = detect_optimal_zoom()
         hexstr = cfg.get("geometry_hex")
         if hexstr:
             ba = QByteArray.fromHex(hexstr.encode())
-            win.restoreGeometry(ba)
+            original_min_width = win.minimumWidth()
+            loaded_mini_mode = bool(mini_mode_cfg) if mini_mode_cfg is not None else app_state.mini_mode
+            if loaded_mini_mode:
+                win.setMinimumWidth(0)
+            try:
+                win.restoreGeometry(ba)
+            finally:
+                if loaded_mini_mode and app_state.mini_mode:
+                    restored_mini_width = max(1, win.width())
+                    win.setMinimumWidth(restored_mini_width)
+                else:
+                    win.setMinimumWidth(original_min_width)
         normal_hex = cfg.get("normal_geometry_hex")
         if normal_hex:
             app_state.saved_geometry = QByteArray.fromHex(normal_hex.encode())
