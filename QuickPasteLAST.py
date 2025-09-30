@@ -1717,6 +1717,8 @@ def update_ui():
 
     if app_state.edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
+        button_height = combo_height if profile_names else scaled(24 if app_state.mini_mode else 32)
+        ap.setFixedHeight(button_height)
         ap.setStyleSheet(
             f"""
             QPushButton {{
