@@ -1334,6 +1334,12 @@ entries_layout.setAlignment(QtCore.Qt.AlignTop)
 entries_layout.setSpacing(6)
 entries_layout.setContentsMargins(8, 8, 8, 8)
 scroll_area.setWidget(container)
+bottom_bar_container = QtWidgets.QWidget()
+bottom_bar_layout = QtWidgets.QHBoxLayout(bottom_bar_container)
+bottom_bar_layout.setContentsMargins(8, 8, 8, 8)
+bottom_bar_layout.setSpacing(8)
+bottom_bar_container.setVisible(False)
+main_layout.addWidget(bottom_bar_container)
 
 #endregion
 
@@ -1477,6 +1483,52 @@ def update_ui():
     entries_margin = 4 if app_state.mini_mode else 8
     entries_layout.setContentsMargins(entries_margin, entries_margin, entries_margin, entries_margin)
     entries_layout.setSpacing(4 if app_state.mini_mode else 6)
+    bottom_bar_container.setStyleSheet(f"background:{bg};")
+    bottom_bar_layout.setContentsMargins(entries_margin, entries_margin, entries_margin, entries_margin)
+    while bottom_bar_layout.count():
+        item = bottom_bar_layout.takeAt(0)
+        widget = item.widget()
+        if widget is not None:
+            widget.deleteLater()
+    if app_state.edit_mode:
+        bottom_bar_container.setVisible(True)
+        bottom_bar_container.setEnabled(True)
+        button_border_color = '#555' if app_state.dark_mode else '#ccc'
+        button_hover_bg = '#4a4a4a' if app_state.dark_mode else '#f0f0f0'
+        button_min_height = int(40 * app_state.zoom_level)
+        save_button = QtWidgets.QPushButton("💾 Speichern")
+        save_button.setMinimumHeight(button_min_height)
+        save_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: #2e7d32;
+                color: white;
+                border: 1px solid {button_border_color};
+                border-radius: 6px;
+                padding: 8px 12px;
+                min-height: 10px;}}
+            QPushButton:hover {{background: #388e3c;}}"""
+        )
+        save_button.clicked.connect(save_data)
+        bottom_bar_layout.addWidget(save_button)
+        add_button = QtWidgets.QPushButton("➕ Eintrag hinzufügen")
+        add_button.setMinimumHeight(button_min_height)
+        add_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: {bbg};
+                color: {fg};
+                border: 1px solid {button_border_color};
+                border-radius: 6px;
+                padding: 8px 12px;
+                min-height: 10px;}}
+            QPushButton:hover {{background: {button_hover_bg};}}"""
+        )
+        add_button.clicked.connect(add_new_entry)
+        bottom_bar_layout.addWidget(add_button)
+    else:
+        bottom_bar_container.setVisible(False)
+        bottom_bar_container.setEnabled(False)
     toolbar.clear()
     app_state.profile_buttons = {}
     app_state.profile_selector = None
@@ -1490,29 +1542,39 @@ def update_ui():
         profile_names.append("SDE")
     if profile_names:
         selector_container = QtWidgets.QWidget()
-        selector_container.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
+        selector_container.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         selector_layout = QtWidgets.QHBoxLayout(selector_container)
         selector_layout.setContentsMargins(0, 0, 0, 0)
         selector_layout.setSpacing(1 if app_state.mini_mode else 3)
         def scaled(value):
             return max(1, int(value * app_state.zoom_level))
+        
         combo = ProfileComboBox()
         combo.setEditable(app_state.edit_mode)
         combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
-        combo.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        combo.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         combo_height = scaled(24 if app_state.mini_mode else 32)
         combo.setFixedHeight(combo_height)
-        combo.setMinimumWidth(scaled(120 if app_state.mini_mode else 140))  # GEÄNDERT: Breiter für vollständige Namen
-        
+
+        if app_state.mini_mode:
+            combo.setMinimumWidth(scaled(90))
+            combo.setMaximumWidth(scaled(110))
+            drop_width = scaled(16)
+        else:
+            combo.setMinimumWidth(scaled(140))
+            combo.setMaximumWidth(scaled(200))
+            drop_width = scaled(26)
+
         radius = scaled(5)  # GEÄNDERT: Einheitliche Rundung für alle Buttons
         padding_v = scaled(3 if app_state.mini_mode else 6)
         padding_h = scaled(8 if app_state.mini_mode else 14)
-        drop_width = scaled(20 if app_state.mini_mode else 26)
         border_color = "#555" if app_state.dark_mode else "#ccc"
         combo.setStyleSheet(f"""
             QComboBox {{
                 background:{bbg};
                 color:{fg};
+
+                
                 border: 1px solid {border_color};
                 border-radius:{radius}px;
                 padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;}}
@@ -1854,44 +1916,6 @@ def update_ui():
             lh.setAlignment(QtCore.Qt.AlignCenter)
             hl.addWidget(lh)
         entries_layout.addWidget(row)
-    if app_state.edit_mode:
-        bw = QtWidgets.QWidget()
-        bl = QtWidgets.QHBoxLayout(bw)
-        bl.setContentsMargins(0,0,0,0)
-        bs = QtWidgets.QPushButton("💾 Speichern")
-        button_border_color = '#555' if app_state.dark_mode else '#ccc'
-        button_hover_bg = '#4a4a4a' if app_state.dark_mode else '#f0f0f0'
-        button_min_height = int(40 * app_state.zoom_level)
-        bs.setMinimumHeight(button_min_height)
-        bs.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: #2e7d32;
-                color: white;
-                border: 1px solid {button_border_color};
-                border-radius: 6px;
-                padding: 8px 12px;
-                min-height: {button_min_height}px;}}
-            QPushButton:hover {{background: #388e3c;}}"""
-        )
-        bs.clicked.connect(save_data)
-        bl.addWidget(bs)
-        ba = QtWidgets.QPushButton("➕ Eintrag hinzufügen")
-        ba.setMinimumHeight(button_min_height)
-        ba.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {bbg};
-                color: {fg};
-                border: 1px solid {button_border_color};
-                border-radius: 6px;
-                padding: 8px 12px;
-                min-height: {button_min_height}px;}}
-            QPushButton:hover {{background: {button_hover_bg};}}"""
-        )
-        ba.clicked.connect(add_new_entry)
-        bl.addWidget(ba)
-        entries_layout.addWidget(bw)
 
 #endregion
 
