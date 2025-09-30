@@ -1502,8 +1502,9 @@ def update_ui():
         combo.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         combo_height = scaled(24 if app_state.mini_mode else 32)
         combo.setFixedHeight(combo_height)
-        combo.setMinimumWidth(scaled(50 if app_state.mini_mode else 50))
-        radius = scaled(7 if app_state.mini_mode else 11)
+        combo.setMinimumWidth(scaled(120 if app_state.mini_mode else 140))  # GEÄNDERT: Breiter für vollständige Namen
+        
+        radius = scaled(5)  # GEÄNDERT: Einheitliche Rundung für alle Buttons
         padding_v = scaled(3 if app_state.mini_mode else 6)
         padding_h = scaled(8 if app_state.mini_mode else 14)
         drop_width = scaled(20 if app_state.mini_mode else 26)
@@ -1515,7 +1516,6 @@ def update_ui():
                 border: 1px solid {border_color};
                 border-radius:{radius}px;
                 padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;}}
-            /* Rechte Subcontrol explizit runden + gleiche Farbe geben */
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
@@ -1531,26 +1531,31 @@ def update_ui():
                 border: 1px solid {border_color};
                 selection-background-color:#4a90e2;
                 selection-color:white;}}""")
+        
         selector_layout.addWidget(combo)
         app_state.profile_selector = combo
+        
         delete_btn = None
         if app_state.edit_mode:
             delete_btn = QtWidgets.QPushButton("❌")
-            btn_size = scaled(24 if app_state.mini_mode else 28)
+            btn_size = scaled(24 if app_state.mini_mode else 32)  # GEÄNDERT: Gleiche Höhe wie Combo
             delete_btn.setFixedSize(btn_size, btn_size)
-            btn_radius = max(8, btn_size // 2)
             delete_btn.setStyleSheet(
                 f"""
                 QPushButton {{
                     background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};
                     color:white;
                     border: 1px solid #b71c1c;
-                    border-radius: 3px;}}
+                    border-radius: {radius}px;}}  
                 QPushButton:hover {{background:#f44336;}}
                 QPushButton:pressed {{background:#b71c1c;}}""")
             delete_btn.setToolTip("Ausgewähltes Profil löschen")
             selector_layout.addWidget(delete_btn)
             app_state.profile_delete_button = delete_btn
+
+
+
+
         toolbar.addWidget(selector_container)
         for name in profile_names:
             combo.addItem(name, name)
@@ -1599,21 +1604,25 @@ def update_ui():
             elif combo.count() > 0:
                 combo.setCurrentIndex(0)
         update_delete_state()
-    spacer = QtWidgets.QWidget()
-    spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-    toolbar.addWidget(spacer)
+
     if app_state.edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
         ap.setStyleSheet(
             f"""
             QPushButton {{
                 background:{bbg}; color:{fg};
+                border: 1px solid {border_color};
                 border-radius: 5px;
                 padding: 6px 16px;
-                margin-right: 4px;}}
+                margin-left: 8px;}}  
             QPushButton:hover {{background:#666;}}""")
         ap.clicked.connect(add_new_profile)
         toolbar.addWidget(ap)
+        
+    spacer = QtWidgets.QWidget()
+    spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+    toolbar.addWidget(spacer)
+    
     control_size = 26 if app_state.mini_mode else 30
     control_radius = 12 if app_state.mini_mode else 15
     control_margin = 4 if app_state.mini_mode else 6
