@@ -1,4 +1,4 @@
-import sys, os, json, re, ctypes, logging, copy
+import sys, os, json, ctypes, logging, copy
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QFontMetrics
@@ -10,7 +10,6 @@ import win32clipboard
 import win32con
 from functools import partial
 import tempfile
-import shutil
 import sip
 
 APPDATA_PATH = os.path.join(os.environ["APPDATA"], "QuickPaste")
@@ -24,14 +23,11 @@ BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "H.ico")
 
 DEFAULT_FONT_SIZE = 5 
-MIN_FONT_SIZE = 5
-MAX_FONT_SIZE = 5
 
 class QuickPasteState:
     """Centralized application state management"""
     def __init__(self):
         self.dark_mode = False
-        self.registered_hotkey_refs = []
         self.unsaved_changes = False
         self.dragged_index = None
         self.current_target = None
@@ -429,6 +425,7 @@ def apply_profile_renames(show_errors=True):
     app_state.data["profiles"] = new_profiles
     app_state.data["active_profile"] = app_state.active_profile
     return True
+
 def _remember_profile_name_edit(text):
     if not app_state.edit_mode:
         return
@@ -445,17 +442,7 @@ def _remember_profile_name_edit(text):
     if entry is None:
         return
     entry.set_pending_text(text)
-def save_profile_names():
-    result = apply_profile_renames(show_errors=True)
-    if result is None or result is False:
-        return
-    profiles_to_save = {k: v for k, v in app_state.data["profiles"].items() if k != "SDE"}
-    debounced_saver.schedule_save({
-        "profiles": profiles_to_save,
-        "active_profile": app_state.active_profile})
-    update_ui()
-    update_profile_buttons()
-    refresh_tray()
+
 def update_profile_buttons():
     combo = getattr(app_state, "profile_selector", None)
     if combo is None:
