@@ -3,7 +3,6 @@ from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QFontMetrics
 from PyQt5.QtCore import QByteArray
-import time
 import pyperclip
 from PyQt5.QtWidgets import QSystemTrayIcon, QAction, QMenu
 import win32clipboard
@@ -11,6 +10,7 @@ import win32con
 from functools import partial
 import tempfile
 import sip
+import time
 
 APPDATA_PATH = os.path.join(os.environ["APPDATA"], "QuickPaste")
 os.makedirs(APPDATA_PATH, exist_ok=True)
@@ -567,8 +567,10 @@ class ClipboardManager:
                 self.clipboard_opened = True
                 break
             except Exception:
-                time.sleep(0.01)
+                process_events_for(10)
         return self
+    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.clipboard_opened:
             try:
@@ -586,6 +588,16 @@ class ClipboardManager:
     def set_data(self, format_type, data):
         if self.clipboard_opened:
             win32clipboard.SetClipboardData(format_type, data)
+
+def process_events_for(duration_ms):
+    """Let Qt process events for the given duration without blocking the GUI."""
+    duration_ms = max(0, int(duration_ms))
+    if duration_ms == 0:
+        QtWidgets.QApplication.processEvents()
+        return
+    loop = QtCore.QEventLoop()
+    QtCore.QTimer.singleShot(duration_ms, loop.quit)
+    loop.exec_()
 
 def set_clipboard_html(html_content, plain_text_content):
     """
@@ -635,10 +647,10 @@ def set_clipboard_html(html_content, plain_text_content):
                 full_bytes = header_bytes + body_bytes
                 cf_html = win32clipboard.RegisterClipboardFormat("HTML Format")
                 clipboard.set_data(cf_html, full_bytes)
-                time.sleep(0.01)
+                process_events_for(10)
                 with ClipboardManager() as verify_clipboard:
                     if verify_clipboard.is_open():
-                        html_ok = win32clipboard.IsClipboardFormatAvailable(cf_html)
+                        html_ok = win32clipboard.IsClipboardFormatAvailable(cf_html)                        
                         txt_ok  = win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT)
                         if html_ok and txt_ok:
                             logging.info(f"Clipboard set (attempt {attempt+1}).")
@@ -649,11 +661,11 @@ def set_clipboard_html(html_content, plain_text_content):
         except Exception as e:
             logging.warning(f"Error setting clipboard (attempt {attempt+1}): {e}")
         if attempt < max_retries - 1:
-            time.sleep(retry_delay)
+            process_events_for(int(retry_delay * 1000))
     logging.error(f"Failed to set clipboard after {max_retries} attempts")
     return False
 
-def release_all_modifier_keys():
+def release_all_modifier_keys(callback=None, delay_before_callback_ms=50):
     """
     Lässt sicherheitshalber alle Modifiertasten los (Ctrl/Shift/Alt/Win),
     ohne die 'keyboard'-Bibliothek zu verwenden.
@@ -662,24 +674,44 @@ def release_all_modifier_keys():
         user32 = ctypes.windll.user32
         KEYEVENTF_KEYUP = 0x0002
         modifiers = (0x11, 0x10, 0x12, 0x5B, 0x5C)
-        for _ in range(3):
+        iterations = 3
+        interval_ms = 10
+
+        def run_iteration(iteration):
             for vk in modifiers:
                 try:
                     user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
                 except Exception:
                     pass
-            time.sleep(0.01)
-        time.sleep(0.05)  
+            if iteration + 1 < iterations:
+                QtCore.QTimer.singleShot(interval_ms, lambda: run_iteration(iteration + 1))
+            elif callback is not None:
+                QtCore.QTimer.singleShot(max(0, int(delay_before_callback_ms)), callback)
+
+        QtCore.QTimer.singleShot(0, lambda: run_iteration(0))
     except Exception as e:
         logging.warning(f"Error releasing modifier keys (WinAPI): {e}")
+        if callback is not None:
+            QtCore.QTimer.singleShot(max(0, int(delay_before_callback_ms)), callback)
 
 def insert_text(index):
     def _send_ctrl_v():
         user32 = ctypes.windll.user32
-        user32.keybd_event(0x11, 0, 0, 0) 
-        user32.keybd_event(0x56, 0, 0, 0)  
-        user32.keybd_event(0x56, 0, 2, 0)  
-        user32.keybd_event(0x11, 0, 2, 0)  
+        user32.keybd_event(0x11, 0, 0, 0)
+        user32.keybd_event(0x56, 0, 0, 0)
+        user32.keybd_event(0x56, 0, 2, 0)
+        user32.keybd_event(0x11, 0, 2, 0)
+
+    def schedule_ctrl_v():
+        def perform_paste():
+            try:
+                _send_ctrl_v()
+            finally:
+                QtCore.QTimer.singleShot(50, release_all_modifier_keys)
+            logging.info(f"Successfully inserted text for index {index}")
+
+        release_all_modifier_keys(callback=perform_paste, delay_before_callback_ms=0)
+
     try:
         txt = app_state.data["profiles"][app_state.active_profile]["texts"][index]
         logging.info(f"Inserting text for index {index}: {txt[:50]}...")
@@ -697,12 +729,7 @@ def insert_text(index):
             logging.warning("Windows clipboard failed, falling back to pyperclip")
             pyperclip.copy(plain_text)
             logging.info(f"Fallback: Set plain text to clipboard: {plain_text[:30]}...")
-        time.sleep(0.2)
-        release_all_modifier_keys()
-        _send_ctrl_v()
-        time.sleep(0.05)
-        release_all_modifier_keys()
-        logging.info(f"Successfully inserted text for index {index}")
+        QtCore.QTimer.singleShot(200, schedule_ctrl_v)
     except Exception as e:
         logging.exception(f"Error in insert_text for index {index}: {e}")
         try:
@@ -712,13 +739,9 @@ def insert_text(index):
             pyperclip.copy(plain_text)
             logging.info(f"Final fallback: Set plain text to clipboard: {plain_text[:30]}...")
             release_all_modifier_keys()
-            _send_ctrl_v()
-            time.sleep(0.05)
-            release_all_modifier_keys()
-            logging.info(f"Successfully inserted text (final fallback) for index {index}")
+            QtCore.QTimer.singleShot(200, schedule_ctrl_v)
         except Exception as fallback_error:
             logging.exception(f"All clipboard methods failed for index {index}: {fallback_error}")
-
 def copy_text_to_clipboard(index):
     try:
         txt = app_state.data["profiles"][app_state.active_profile]["texts"][index]
@@ -2136,8 +2159,8 @@ def toggle_mini_mode():
 app.aboutToQuit.connect(lambda: (debounced_saver.timer.stop(), debounced_saver._save()))
 load_window_position()
 update_ui()
-create_tray_icon()
 register_hotkeys()
+create_tray_icon()
 win.show()
 setup_window_scaling()
 sys.exit(app.exec_())
