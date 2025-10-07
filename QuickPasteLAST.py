@@ -607,6 +607,7 @@ def set_clipboard_html(html_content, plain_text_content):
     """
     max_retries = 3
     retry_delay = 0.02
+    cf_html = win32clipboard.RegisterClipboardFormat("HTML Format")
     for attempt in range(max_retries):
         try:
             with ClipboardManager() as clipboard:
@@ -645,19 +646,20 @@ def set_clipboard_html(html_content, plain_text_content):
                     end_frag=end_frag
                 ).encode("utf-8")
                 full_bytes = header_bytes + body_bytes
-                cf_html = win32clipboard.RegisterClipboardFormat("HTML Format")
                 clipboard.set_data(cf_html, full_bytes)
-                process_events_for(10)
-                with ClipboardManager() as verify_clipboard:
-                    if verify_clipboard.is_open():
-                        html_ok = win32clipboard.IsClipboardFormatAvailable(cf_html)                        
-                        txt_ok  = win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT)
-                        if html_ok and txt_ok:
-                            logging.info(f"Clipboard set (attempt {attempt+1}).")
-                            return True
-                        else:
-                            logging.warning(
-                                f"Clipboard verify failed (attempt {attempt+1}): HTML={html_ok}, TEXT={txt_ok}")
+            time.sleep(0.01)
+            with ClipboardManager() as verify_clipboard:
+                if verify_clipboard.is_open():
+                    html_ok = win32clipboard.IsClipboardFormatAvailable(cf_html)
+                    txt_ok  = win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT)
+                    if html_ok and txt_ok:
+                        logging.info(f"Clipboard set (attempt {attempt+1}).")
+                        return True
+                    logging.warning(
+                        f"Clipboard verify failed (attempt {attempt+1}): HTML={html_ok}, TEXT={txt_ok}")
+                else:
+                    logging.warning(
+                        f"Clipboard verify reopen failed (attempt {attempt+1})")
         except Exception as e:
             logging.warning(f"Error setting clipboard (attempt {attempt+1}): {e}")
         if attempt < max_retries - 1:
