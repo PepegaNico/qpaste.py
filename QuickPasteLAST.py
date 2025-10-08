@@ -129,7 +129,12 @@ class DebouncedSaver:
         self.timer.timeout.connect(self._save)
         self.pending_data = None
     def schedule_save(self, data):
-        self.pending_data = data
+        if self.timer.isActive():
+            self.timer.stop()
+        try:
+            self.pending_data = copy.deepcopy(data)
+        except Exception:
+            self.pending_data = data
         self.timer.start()
     def _save(self):
         if self.pending_data is not None:
@@ -342,6 +347,8 @@ def has_field_changes(profile_to_check=None):
     reference_profile = None
     if reference_profiles is not None:
         reference_profile = reference_profiles.get(profile_to_check)
+    if reference_profile is None:
+        reference_profile = app_state.data.get("profiles", {}).get(profile_to_check)
     if reference_profile is None:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -647,7 +654,7 @@ def set_clipboard_html(html_content, plain_text_content):
                 ).encode("utf-8")
                 full_bytes = header_bytes + body_bytes
                 clipboard.set_data(cf_html, full_bytes)
-            time.sleep(0.01)
+            process_events_for(10)
             with ClipboardManager() as verify_clipboard:
                 if verify_clipboard.is_open():
                     html_ok = win32clipboard.IsClipboardFormatAvailable(cf_html)
@@ -1324,19 +1331,14 @@ def create_text_button(i, texts, hks, ebg, fg):
     def on_resize(event):
         if original_resize:
             original_resize(event)
-        for ms in (0, 40):
-            t = QtCore.QTimer(text_btn)  
+        for ms in (0, 100):  # Nur 2 Updates: sofort + nach Resize
+            t = QtCore.QTimer(text_btn)
             t.setSingleShot(True)
             t.timeout.connect(update_button_text)
             t.start(ms)
     text_btn.resizeEvent = on_resize
     text_btn.clicked.connect(partial(copy_text_to_clipboard, i))
     text_btn._update_text = update_button_text
-    for ms in (30, 120):
-        t = QtCore.QTimer(text_btn)
-        t.setSingleShot(True)
-        t.timeout.connect(update_button_text)
-        t.start(ms)
     return text_btn
 
 def initialize_application():
@@ -1356,12 +1358,8 @@ def initialize_application():
 #region Hauptfenster
 
 app = initialize_application()
-if sys.platform.startswith("win"):
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("QuickPaste")
 win = QtWidgets.QMainWindow()
 
-def setup_window_scaling():
-    QtCore.QTimer.singleShot(0, apply_auto_dpi_scaling)
 win.setWindowTitle("QuickPaste")
 win.setMinimumSize(399, 100)
 app_state.normal_minimum_width = win.minimumWidth()
@@ -2164,5 +2162,5 @@ update_ui()
 register_hotkeys()
 create_tray_icon()
 win.show()
-setup_window_scaling()
+QtCore.QTimer.singleShot(0, apply_auto_dpi_scaling)
 sys.exit(app.exec_())
