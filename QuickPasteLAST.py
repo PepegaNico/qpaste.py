@@ -132,10 +132,15 @@ class DebouncedSaver:
         if self.timer.isActive():
             self.timer.stop()
         try:
-            self.pending_data = copy.deepcopy(data)
+            # Shallow copy der obersten Ebene reicht für deine Datenstruktur
+            self.pending_data = {
+                "profiles": {k: v.copy() for k, v in data.get("profiles", {}).items()},
+                "active_profile": data.get("active_profile")
+            }
         except Exception:
-            self.pending_data = data
+            self.pending_data = copy.deepcopy(data)  # Nur als Fallback
         self.timer.start()
+
     def _save(self):
         if self.pending_data is not None:
             try:
@@ -343,19 +348,18 @@ def has_field_changes(profile_to_check=None):
     normalized_texts = [_normalize_rich_text(t) for t in texts]
     normalized_hotkeys = [_normalize_hotkey(h) for h in hks]
 
-    reference_profiles = app_state.last_ui_data if isinstance(app_state.last_ui_data, dict) else None
     reference_profile = None
-    if reference_profiles is not None:
-        reference_profile = reference_profiles.get(profile_to_check)
-    if reference_profile is None:
-        reference_profile = app_state.data.get("profiles", {}).get(profile_to_check)
+    if isinstance(app_state.last_ui_data, dict):
+        reference_profile = app_state.last_ui_data.get(profile_to_check)
+
     if reference_profile is None:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 persisted = json.load(f)
             reference_profile = persisted.get("profiles", {}).get(profile_to_check)
         except (FileNotFoundError, json.JSONDecodeError):
-            reference_profile = None
+            pass
+
     if reference_profile is None:
         reference_profile = {}
 
@@ -654,7 +658,6 @@ def set_clipboard_html(html_content, plain_text_content):
                 ).encode("utf-8")
                 full_bytes = header_bytes + body_bytes
                 clipboard.set_data(cf_html, full_bytes)
-            process_events_for(10)
             with ClipboardManager() as verify_clipboard:
                 if verify_clipboard.is_open():
                     html_ok = win32clipboard.IsClipboardFormatAvailable(cf_html)
