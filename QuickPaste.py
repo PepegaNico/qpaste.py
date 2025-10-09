@@ -1851,7 +1851,7 @@ def update_ui():
         else:
             lh = QtWidgets.QLabel(hks[i])
             lh.setFixedHeight(40)
-            lh.setStyleSheet(f"""color: {fg}; background: {ebg}; padding: 8px 16px;  min-width: 120px;  border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 6px;font-family: 'Consolas', 'Monaco', monospace;""")
+            lh.setStyleSheet(f"""color: {fg}; background: {ebg}; padding: 8px 16px;  min-width: 100px;  border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 6px;font-family: 'Consolas', 'Monaco', monospace;""")
             lh.setAlignment(QtCore.Qt.AlignCenter)
             hl.addWidget(lh)
         entries_layout.addWidget(row)
