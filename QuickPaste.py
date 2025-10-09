@@ -131,15 +131,13 @@ class DebouncedSaver:
         if self.timer.isActive():
             self.timer.stop()
         try:
-            # Shallow copy der obersten Ebene reicht für deine Datenstruktur
             self.pending_data = {
                 "profiles": {k: v.copy() for k, v in data.get("profiles", {}).items()},
                 "active_profile": data.get("active_profile")
             }
         except Exception:
-            self.pending_data = copy.deepcopy(data)  # Nur als Fallback
+            self.pending_data = copy.deepcopy(data) 
         self.timer.start()
-
     def _save(self):
         if self.pending_data is not None:
             try:
@@ -173,7 +171,8 @@ def save_window_position():
         cfg = {
             "geometry_hex": geo_hex,
             "dark_mode": app_state.dark_mode,
-            "mini_mode": app_state.mini_mode}
+            "mini_mode": app_state.mini_mode,
+            "zoom_level": app_state.zoom_level}
         if app_state.saved_geometry is not None:
             cfg["normal_geometry_hex"] = bytes(app_state.saved_geometry.toHex()).decode()
         else:
@@ -195,7 +194,11 @@ def load_window_position():
         mini_mode_cfg = cfg.get("mini_mode")
         if mini_mode_cfg is not None:
             app_state.mini_mode = mini_mode_cfg
-        app_state.zoom_level = detect_optimal_zoom()
+        saved_zoom = cfg.get("zoom_level")
+        if saved_zoom is not None:
+            app_state.zoom_level = saved_zoom
+        else:
+            app_state.zoom_level = detect_optimal_zoom()
         hexstr = cfg.get("geometry_hex")
         if hexstr:
             ba = QByteArray.fromHex(hexstr.encode())
@@ -315,7 +318,6 @@ def has_field_changes(profile_to_check=None):
     profiles = app_state.data.get("profiles", {})
     if profile_to_check not in profiles:
         return False
-
     rename_changed = False
     if app_state.profile_entries:
         for old_name, entry in app_state.profile_entries.items():
@@ -328,7 +330,6 @@ def has_field_changes(profile_to_check=None):
             if new_name != _normalize_title(old_name):
                 rename_changed = True
                 break
-
     titles, texts, hks = [], [], []
     for i in range(entries_layout.count()):
         item = entries_layout.itemAt(i)
@@ -342,15 +343,12 @@ def has_field_changes(profile_to_check=None):
                 titles.append(line_edits[0].text())
                 texts.append(text_edits[0].toHtml())
                 hks.append(line_edits[1].text())
-
     normalized_titles = [_normalize_title(t) for t in titles]
     normalized_texts = [_normalize_rich_text(t) for t in texts]
     normalized_hotkeys = [_normalize_hotkey(h) for h in hks]
-
     reference_profile = None
     if isinstance(app_state.last_ui_data, dict):
         reference_profile = app_state.last_ui_data.get(profile_to_check)
-
     if reference_profile is None:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -358,19 +356,15 @@ def has_field_changes(profile_to_check=None):
             reference_profile = persisted.get("profiles", {}).get(profile_to_check)
         except (FileNotFoundError, json.JSONDecodeError):
             pass
-
     if reference_profile is None:
         reference_profile = {}
-
     stored_titles = [_normalize_title(t) for t in reference_profile.get("titles", [])]
     stored_texts = [_normalize_rich_text(t) for t in reference_profile.get("texts", [])]
     stored_hotkeys = [_normalize_hotkey(h) for h in reference_profile.get("hotkeys", [])]
-
     fields_changed = (
         normalized_titles != stored_titles
         or normalized_texts != stored_texts
         or normalized_hotkeys != stored_hotkeys)
-
     changed = rename_changed or fields_changed
     if not changed:
         app_state.unsaved_changes = False
@@ -475,7 +469,6 @@ def update_profile_buttons():
             and data not in (None, "SDE"))
         delete_btn.setEnabled(can_delete)
 
-
 def switch_profile(profile_name):
     if profile_name == app_state.active_profile:
         return
@@ -579,8 +572,6 @@ class ClipboardManager:
             except Exception:
                 process_events_for(10)
         return self
-    
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.clipboard_opened:
             try:
@@ -687,7 +678,6 @@ def release_all_modifier_keys(callback=None, delay_before_callback_ms=50):
         modifiers = (0x11, 0x10, 0x12, 0x5B, 0x5C)
         iterations = 3
         interval_ms = 10
-
         def run_iteration(iteration):
             for vk in modifiers:
                 try:
@@ -698,7 +688,6 @@ def release_all_modifier_keys(callback=None, delay_before_callback_ms=50):
                 QtCore.QTimer.singleShot(interval_ms, lambda: run_iteration(iteration + 1))
             elif callback is not None:
                 QtCore.QTimer.singleShot(max(0, int(delay_before_callback_ms)), callback)
-
         QtCore.QTimer.singleShot(0, lambda: run_iteration(0))
     except Exception as e:
         logging.warning(f"Error releasing modifier keys (WinAPI): {e}")
@@ -712,7 +701,6 @@ def insert_text(index):
         user32.keybd_event(0x56, 0, 0, 0)
         user32.keybd_event(0x56, 0, 2, 0)
         user32.keybd_event(0x11, 0, 2, 0)
-
     def schedule_ctrl_v():
         def perform_paste():
             try:
@@ -720,9 +708,7 @@ def insert_text(index):
             finally:
                 QtCore.QTimer.singleShot(50, release_all_modifier_keys)
             logging.info(f"Successfully inserted text for index {index}")
-
         release_all_modifier_keys(callback=perform_paste, delay_before_callback_ms=0)
-
     try:
         txt = app_state.data["profiles"][app_state.active_profile]["texts"][index]
         logging.info(f"Inserting text for index {index}: {txt[:50]}...")
@@ -753,6 +739,7 @@ def insert_text(index):
             QtCore.QTimer.singleShot(200, schedule_ctrl_v)
         except Exception as fallback_error:
             logging.exception(f"All clipboard methods failed for index {index}: {fallback_error}")
+
 def copy_text_to_clipboard(index):
     try:
         txt = app_state.data["profiles"][app_state.active_profile]["texts"][index]
@@ -1022,16 +1009,13 @@ class DragDropWidget(QtWidgets.QWidget):
         self.setAcceptDrops(True)
         self.original_style = ""
         self.is_highlighted = False
-    
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
             self.highlight_drop_zone(True)
             event.acceptProposedAction()
-    
     def dragLeaveEvent(self, event):
         self.highlight_drop_zone(False)
         super().dragLeaveEvent(event)
-    
     def dropEvent(self, event):
         self.highlight_drop_zone(False)
         if event.mimeData().hasText():
@@ -1040,7 +1024,6 @@ class DragDropWidget(QtWidgets.QWidget):
             if source_index != target_index:
                 move_entry_to(source_index, target_index)
             event.acceptProposedAction()
-    
     def highlight_drop_zone(self, highlight):
         if highlight and not self.is_highlighted:
             self.original_style = self.styleSheet()
@@ -1257,6 +1240,24 @@ def confirm_and_then(action_if_yes):
 
 #endregion
 
+#region zoom management
+
+def adjust_zoom(delta):
+    """Zoom-Level anpassen mit CTRL+Mausrad"""
+    step = 0.1 if delta > 0 else -0.1
+    new_zoom = app_state.zoom_level + step
+    new_zoom = max(0.5, min(2.0, new_zoom))
+    if new_zoom != app_state.zoom_level:
+        app_state.zoom_level = new_zoom
+        apply_auto_dpi_scaling()
+        update_ui()
+        save_window_position()
+        if hasattr(win, 'statusBar'):
+            zoom_percent = int(new_zoom * 100)
+            win.statusBar().showMessage(f"Zoom: {zoom_percent}%", 1500)
+
+#endregion
+
 #region zoom
 
 def apply_auto_dpi_scaling():
@@ -1324,7 +1325,7 @@ def create_text_button(i, texts, hks, ebg, fg):
             border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
             border-radius: 6px;}}
         QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}""")
-    text_btn.setObjectName("qp_text_btn")   # für das Refresh-Finding
+    text_btn.setObjectName("qp_text_btn")  
     text_btn.setFixedHeight(int(40 * app_state.zoom_level))
     text_btn.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
     text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i] if i < len(hks) else ''}")
@@ -1339,7 +1340,7 @@ def create_text_button(i, texts, hks, ebg, fg):
     def on_resize(event):
         if original_resize:
             original_resize(event)
-        for ms in (0, 100):  # Nur 2 Updates: sofort + nach Resize
+        for ms in (0, 100):  
             t = QtCore.QTimer(text_btn)
             t.setSingleShot(True)
             t.timeout.connect(update_button_text)
@@ -1367,7 +1368,17 @@ def initialize_application():
 
 app = initialize_application()
 win = QtWidgets.QMainWindow()
-
+class ZoomEventFilter(QtCore.QObject):
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Wheel:
+            modifiers = QtWidgets.QApplication.keyboardModifiers()
+            if modifiers == QtCore.Qt.ControlModifier:
+                delta = event.angleDelta().y()
+                adjust_zoom(delta)
+                return True 
+        return False 
+zoom_filter = ZoomEventFilter()
+win.installEventFilter(zoom_filter)
 win.setWindowTitle("QuickPaste")
 win.setMinimumSize(399, 100)
 app_state.normal_minimum_width = win.minimumWidth()
@@ -1456,25 +1467,11 @@ def show_text_context_menu(pos, text_widget):
         insert_link_action.triggered.connect(lambda: insert_hyperlink_at_cursor(text_widget))
     if app_state.dark_mode:
         menu.setStyleSheet("""
-            QMenu {
-                background-color: #2e2e2e;
-                color: white;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 2px;}
-            QMenu::item {
-                background-color: transparent;
-                padding: 6px 20px;
-                border-radius: 3px;}
-            QMenu::item:selected {
-                background-color: #4a90e2;
-                color: white;}
-            QMenu::item:disabled {
-                color: #888;}
-            QMenu::separator {
-                height: 1px;
-                background-color: #555;
-                margin: 2px 10px;}""")
+            QMenu {background-color: #2e2e2e; color: white; border: 1px solid #555; border-radius: 4px; padding: 2px;}
+            QMenu::item {background-color: transparent; padding: 6px 20px; border-radius: 3px;}
+            QMenu::item:selected {background-color: #4a90e2; color: white;}
+            QMenu::item:disabled {color: #888;}
+            QMenu::separator {height: 1px; background-color: #555; margin: 2px 10px;}""")
     global_pos = text_widget.mapToGlobal(pos)
     menu.exec_(global_pos)
 
@@ -1608,23 +1605,19 @@ def update_ui():
         profile_names.append("SDE")
     def scaled(value):
         return max(1, int(value * app_state.zoom_level))
-
     selector_spacing = scaled(1 if app_state.mini_mode else 3)
-
     if profile_names:
         selector_container = QtWidgets.QWidget()
         selector_container.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         selector_layout = QtWidgets.QHBoxLayout(selector_container)
         selector_layout.setContentsMargins(0, 0, 0, 0)
         selector_layout.setSpacing(selector_spacing)
-        
         combo = ProfileComboBox()
         combo.setEditable(app_state.edit_mode)
         combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         combo.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         combo_height = scaled(24 if app_state.mini_mode else 32)
         combo.setFixedHeight(combo_height)
-
         if app_state.mini_mode:
             combo.setMinimumWidth(scaled(90))
             combo.setMaximumWidth(scaled(110))
@@ -1633,8 +1626,7 @@ def update_ui():
             combo.setMinimumWidth(scaled(140))
             combo.setMaximumWidth(scaled(200))
             drop_width = scaled(26)
-
-        radius = scaled(5)  # GEÄNDERT: Einheitliche Rundung für alle Buttons
+        radius = scaled(5) 
         padding_v = scaled(3 if app_state.mini_mode else 6)
         padding_h = scaled(8 if app_state.mini_mode else 14)
         border_color = "#555" if app_state.dark_mode else "#ccc"
@@ -1642,8 +1634,6 @@ def update_ui():
             QComboBox {{
                 background:{bbg};
                 color:{fg};
-
-                
                 border: 1px solid {border_color};
                 border-radius:{radius}px;
                 padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;}}
@@ -1662,10 +1652,8 @@ def update_ui():
                 border: 1px solid {border_color};
                 selection-background-color:#4a90e2;
                 selection-color:white;}}""")
-        
         selector_layout.addWidget(combo)
         app_state.profile_selector = combo
-        
         delete_btn = None
         if app_state.edit_mode:
             delete_btn = QtWidgets.QPushButton("❌")
@@ -1683,7 +1671,6 @@ def update_ui():
             delete_btn.setToolTip("Ausgewähltes Profil löschen")
             selector_layout.addWidget(delete_btn)
             app_state.profile_delete_button = delete_btn
-
         toolbar.addWidget(selector_container)
         for name in profile_names:
             combo.addItem(name, name)
@@ -1732,7 +1719,6 @@ def update_ui():
             elif combo.count() > 0:
                 combo.setCurrentIndex(0)
         update_delete_state()
-
     if app_state.edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
         button_height = combo_height if profile_names else scaled(24 if app_state.mini_mode else 32)
@@ -1759,11 +1745,9 @@ def update_ui():
                 )
                 toolbar.addWidget(spacer)
         toolbar.addWidget(ap)
-        
     spacer = QtWidgets.QWidget()
     spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     toolbar.addWidget(spacer)
-    
     control_size = 26 if app_state.mini_mode else 30
     control_radius = 12 if app_state.mini_mode else 15
     control_margin = 4 if app_state.mini_mode else 6
@@ -1816,24 +1800,10 @@ def update_ui():
             mini_button = QtWidgets.QPushButton()
             mini_hotkey_color = '#d0d0d0' if app_state.dark_mode else '#333333'
             mini_button.setStyleSheet(f"""
-                QPushButton {{
-                    background: {ebg};
-                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                    border-radius: 6px;
-                    padding: 1px 4px;}}
-                QPushButton:hover {{
-                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}
-                QPushButton QLabel {{
-                    color: {fg};
-                    font-weight: bold;
-                    background: transparent;
-                    padding: 0;}}
-                QPushButton QLabel#miniHotkeyLabel {{
-                    font-weight: normal;
-                    padding-left: 4px;
-                    padding-right: 2px;
-                    font-size: 12px;
-                    color: {mini_hotkey_color};}}""")
+                QPushButton {{background: {ebg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: 6px; padding: 1px 4px;}}
+                QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}
+                QPushButton QLabel {{color: {fg}; font-weight: bold; background: transparent; padding: 0;}}
+                QPushButton QLabel#miniHotkeyLabel {{font-weight: normal; padding-left: 4px; padding-right: 2px; font-size: 12px; color: {mini_hotkey_color};}}""")
             mini_button.setFixedHeight(int(30 * app_state.zoom_level))
             mini_button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             mini_layout = QtWidgets.QHBoxLayout()
@@ -1986,12 +1956,7 @@ def update_ui():
             delete_size = int(38 * app_state.zoom_level)
             delete_btn.setFixedSize(delete_size, delete_size)
             delete_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {ebg};
-                    color: {fg};
-                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                    border-radius: 6px;
-                    padding: 8px;}}
+                QPushButton {{background: {ebg}; color: {fg}; border: 1px solid {'#555' if app_state.dark_mode else '#ccc'}; border-radius: 6px; padding: 8px;}}
                 QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}
                 QPushButton:pressed {{background: {'#3a3a3a' if app_state.dark_mode else '#e0e0e0'};}}""")
             delete_btn.clicked.connect(lambda _, j=i: delete_entry(j))
@@ -1999,14 +1964,16 @@ def update_ui():
             hl.addWidget(delete_btn)
         else:
             lh = QtWidgets.QLabel(hks[i])
-            lh.setFixedHeight(40)
+            lh.setFixedHeight(int(40 * app_state.zoom_level))
             lh.setStyleSheet(f"""
                 color: {fg}; 
                 background: {ebg}; 
-                padding: 10px 12px;
+                padding: 10px 20px;  
+                min-width: 140px;  
                 border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                 border-radius: 6px;
-                font-family: 'Consolas', 'Monaco', monospace;""")
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: {int(11 * app_state.zoom_level)}px;""") 
             lh.setAlignment(QtCore.Qt.AlignCenter)
             hl.addWidget(lh)
         entries_layout.addWidget(row)
@@ -2039,46 +2006,17 @@ def show_help_dialog():
 def apply_dark_mode_to_messagebox(msg):
     if app_state.dark_mode:
         msg.setStyleSheet("""
-            QMessageBox {
-                background-color: #2e2e2e;
-                color: white;}
-            QMessageBox QLabel {
-                color: white !important;}
-            QMessageBox QPushButton {
-                background-color: #444 !important;
-                color: white !important;
-                border: 1px solid #666;
-                border-radius: 5px;
-                min-width: 60px;
-                min-height: 24px;
-                padding: 4px 8px;
-                font-weight: normal;}
-            QMessageBox QPushButton:hover {
-                background-color: #666 !important;
-                color: white !important;}
-            QMessageBox QPushButton:pressed {
-                background-color: #555 !important;
-                color: white !important;}
-            QMessageBox QPushButton:focus {
-                background-color: #4a90e2 !important;
-                color: white !important;
-                border: 1px solid #5aa3f0;}""")
+            QMessageBox {background-color: #2e2e2e;color: white;}
+            QMessageBox QLabel {color: white !important;}
+            QMessageBox QPushButton {background-color: #444 !important; color: white !important; border: 1px solid #666; border-radius: 5px; min-width: 60px; min-height: 24px; padding: 4px 8px; font-weight: normal;}
+            QMessageBox QPushButton:hover {background-color: #666 !important; color: white !important;}
+            QMessageBox QPushButton:pressed {background-color: #555 !important; color: white !important;}
+            QMessageBox QPushButton:focus {background-color: #4a90e2 !important; color: white !important; border: 1px solid #5aa3f0;}""")
         for button in msg.findChildren(QtWidgets.QPushButton):
             button.setStyleSheet("""
-                QPushButton {
-                    background-color: #444;
-                    color: white !important;
-                    border: 1px solid #666;
-                    border-radius: 5px;
-                    min-width: 60px;
-                    min-height: 24px;
-                    padding: 4px 8px;}
-                QPushButton:hover {
-                    background-color: #666;
-                    color: white !important;}
-                QPushButton:pressed {
-                    background-color: #555;
-                    color: white !important;}""")
+                QPushButton {background-color: #444; color: white !important; border: 1px solid #666; border-radius: 5px; min-width: 60px; min-height: 24px; padding: 4px 8px;}
+                QPushButton:hover {background-color: #666; color: white !important;}
+                QPushButton:pressed {background-color: #555; color: white !important;}""")
 
 def show_critical_message(title, text, parent=None):
     if parent is None:
