@@ -1273,8 +1273,9 @@ def apply_auto_dpi_scaling():
 
 def calculate_button_text(html_text, button_width):
     """Berechnet dynamisch den Text für Button-Breite"""
+    doc = QtGui.QTextDocument()
+    plain_text = ""
     try:
-        doc = QtGui.QTextDocument()
         doc.setHtml(html_text)
         plain_text = doc.toPlainText().replace('\n', ' ').strip()
         if not plain_text:
@@ -1282,7 +1283,7 @@ def calculate_button_text(html_text, button_width):
         font = QFont()
         font.setPointSize(int(app_state.base_font_size * app_state.zoom_level))
         metrics = QFontMetrics(font)
-        padding = 30  
+        padding = 30
         usable_width = max(50, button_width - padding)
         if metrics.horizontalAdvance(plain_text) <= usable_width:
             return plain_text
@@ -1304,7 +1305,11 @@ def calculate_button_text(html_text, button_width):
         return ellipsis
     except Exception as e:
         logging.warning(f"Text calculation failed: {e}")
-        return plain_text[:40] + "..." if len(plain_text) > 40 else plain_text
+        fallback_source = plain_text or (html_text or "")
+        fallback = fallback_source.replace('\n', ' ').strip()
+        if not fallback:
+            return "(Leer)"
+        return fallback[:40] + "..." if len(fallback) > 40 else fallback
 
 def create_text_button(i, texts, hks, ebg, fg):
     """Erstellt Text-Button mit dynamischer Größenanpassung"""
