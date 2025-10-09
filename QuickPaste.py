@@ -172,7 +172,7 @@ def save_window_position():
             "geometry_hex": geo_hex,
             "dark_mode": app_state.dark_mode,
             "mini_mode": app_state.mini_mode,
-            "zoom_level": app_state.zoom_level}
+            "zoom_level": round(app_state.zoom_level, 2)} 
         if app_state.saved_geometry is not None:
             cfg["normal_geometry_hex"] = bytes(app_state.saved_geometry.toHex()).decode()
         else:
@@ -195,7 +195,7 @@ def load_window_position():
         if mini_mode_cfg is not None:
             app_state.mini_mode = mini_mode_cfg
         saved_zoom = cfg.get("zoom_level")
-        if saved_zoom is not None:
+        if saved_zoom is not None and 0.7 <= saved_zoom <= 1.5:
             app_state.zoom_level = saved_zoom
         else:
             app_state.zoom_level = detect_optimal_zoom()
@@ -1244,17 +1244,24 @@ def confirm_and_then(action_if_yes):
 
 def adjust_zoom(delta):
     """Zoom-Level anpassen mit CTRL+Mausrad"""
-    step = 0.1 if delta > 0 else -0.1
-    new_zoom = app_state.zoom_level + step
-    new_zoom = max(0.5, min(2.0, new_zoom))
-    if new_zoom != app_state.zoom_level:
-        app_state.zoom_level = new_zoom
-        apply_auto_dpi_scaling()
-        update_ui()
-        save_window_position()
-        if hasattr(win, 'statusBar'):
-            zoom_percent = int(new_zoom * 100)
-            win.statusBar().showMessage(f"Zoom: {zoom_percent}%", 1500)
+    try:
+        step = 0.05 if delta > 0 else -0.05  
+        new_zoom = round(app_state.zoom_level + step, 2)
+        new_zoom = max(0.7, min(1.5, new_zoom))
+        if abs(new_zoom - app_state.zoom_level) > 0.01:
+            app_state.zoom_level = new_zoom
+            app_instance = QtWidgets.QApplication.instance()
+            if app_instance:
+                font_size = max(8, int(round(DEFAULT_FONT_SIZE * app_state.zoom_level)))
+                font = app_instance.font()
+                font.setPointSize(font_size)
+                app_instance.setFont(font)
+            if hasattr(win, 'statusBar'):
+                zoom_percent = int(new_zoom * 100)
+                win.statusBar().showMessage(f"Zoom: {zoom_percent}%", 2000)
+            logging.info(f"Zoom adjusted to {zoom_percent}%")
+    except Exception as e:
+        logging.error(f"Error in adjust_zoom: {e}")
 
 #endregion
 
@@ -1368,17 +1375,19 @@ def initialize_application():
 
 app = initialize_application()
 win = QtWidgets.QMainWindow()
-class ZoomEventFilter(QtCore.QObject):
+class MainWindowEventFilter(QtCore.QObject):
     def eventFilter(self, obj, event):
-        if event.type() == QtCore.QEvent.Wheel:
-            modifiers = QtWidgets.QApplication.keyboardModifiers()
-            if modifiers == QtCore.Qt.ControlModifier:
-                delta = event.angleDelta().y()
-                adjust_zoom(delta)
-                return True 
-        return False 
-zoom_filter = ZoomEventFilter()
-win.installEventFilter(zoom_filter)
+        try:
+            if event.type() == QtCore.QEvent.Wheel:
+                modifiers = QtWidgets.QApplication.keyboardModifiers()
+                if modifiers == QtCore.Qt.ControlModifier:
+                    adjust_zoom(event.angleDelta().y())
+                    event.accept()
+                    return True 
+        except Exception as e:
+            logging.error(f"Error in event filter: {e}")
+        return super().eventFilter(obj, event)
+main_event_filter = MainWindowEventFilter()
 win.setWindowTitle("QuickPaste")
 win.setMinimumSize(399, 100)
 app_state.normal_minimum_width = win.minimumWidth()
@@ -1405,6 +1414,7 @@ scroll_area = QtWidgets.QScrollArea()
 scroll_area.setWidgetResizable(True)
 scroll_area.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
 main_layout.addWidget(scroll_area)
+scroll_area.installEventFilter(main_event_filter)
 container = QtWidgets.QWidget()
 entries_layout = QtWidgets.QVBoxLayout(container)
 entries_layout.setAlignment(QtCore.Qt.AlignTop)
@@ -1964,16 +1974,15 @@ def update_ui():
             hl.addWidget(delete_btn)
         else:
             lh = QtWidgets.QLabel(hks[i])
-            lh.setFixedHeight(int(40 * app_state.zoom_level))
+            lh.setFixedHeight(40)
             lh.setStyleSheet(f"""
                 color: {fg}; 
                 background: {ebg}; 
-                padding: 10px 20px;  
-                min-width: 140px;  
+                padding: 10px 18px;
+                min-width: 130px;
                 border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
                 border-radius: 6px;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: {int(11 * app_state.zoom_level)}px;""") 
+                font-family: 'Consolas', 'Monaco', monospace;""")
             lh.setAlignment(QtCore.Qt.AlignCenter)
             hl.addWidget(lh)
         entries_layout.addWidget(row)
