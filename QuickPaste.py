@@ -1316,15 +1316,9 @@ def create_text_button(i, texts, hks, ebg, fg):
     text_html = texts[i] if i < len(texts) else ""
     text_btn = QtWidgets.QPushButton()
     text_btn.setStyleSheet(f"""
-        QPushButton {{
-            background: {ebg};
-            color: {fg};
-            text-align: left;
-            padding: 8px 12px;
-            border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-            border-radius: 6px;}}
+        QPushButton {{background: {ebg};color: {fg};text-align: left;padding: 8px 12px;border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 6px;}}
         QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}""")
-    text_btn.setObjectName("qp_text_btn")   # für das Refresh-Finding
+    text_btn.setObjectName("qp_text_btn") 
     text_btn.setFixedHeight(int(40 * app_state.zoom_level))
     text_btn.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
     text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i] if i < len(hks) else ''}")
@@ -1339,7 +1333,7 @@ def create_text_button(i, texts, hks, ebg, fg):
     def on_resize(event):
         if original_resize:
             original_resize(event)
-        for ms in (0, 100):  # Nur 2 Updates: sofort + nach Resize
+        for ms in (0, 100): 
             t = QtCore.QTimer(text_btn)
             t.setSingleShot(True)
             t.timeout.connect(update_button_text)
@@ -1367,7 +1361,6 @@ def initialize_application():
 
 app = initialize_application()
 win = QtWidgets.QMainWindow()
-
 win.setWindowTitle("QuickPaste")
 win.setMinimumSize(399, 100)
 app_state.normal_minimum_width = win.minimumWidth()
@@ -1456,25 +1449,11 @@ def show_text_context_menu(pos, text_widget):
         insert_link_action.triggered.connect(lambda: insert_hyperlink_at_cursor(text_widget))
     if app_state.dark_mode:
         menu.setStyleSheet("""
-            QMenu {
-                background-color: #2e2e2e;
-                color: white;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 2px;}
-            QMenu::item {
-                background-color: transparent;
-                padding: 6px 20px;
-                border-radius: 3px;}
-            QMenu::item:selected {
-                background-color: #4a90e2;
-                color: white;}
-            QMenu::item:disabled {
-                color: #888;}
-            QMenu::separator {
-                height: 1px;
-                background-color: #555;
-                margin: 2px 10px;}""")
+            QMenu {background-color: #2e2e2e;color: white;border: 1px solid #555;border-radius: 4px;padding: 2px;}
+            QMenu::item {background-color: transparent;padding: 6px 20px;border-radius: 3px;}
+            QMenu::item:selected {background-color: #4a90e2;color: white;}
+            QMenu::item:disabled {color: #888;}
+            QMenu::separator {height: 1px;background-color: #555;margin: 2px 10px;}""")
     global_pos = text_widget.mapToGlobal(pos)
     menu.exec_(global_pos)
 
@@ -1542,10 +1521,7 @@ def update_ui():
     toolbar.setStyleSheet(f"background:{bg}; border: none;")
     container.setStyleSheet(f"background:{bg};")
     win.statusBar().setStyleSheet(f"""
-        QStatusBar {{
-            background: {bg};
-            color: {fg};
-            border-top: 1px solid #666;}}""")
+        QStatusBar {{background: {bg};color: {fg};border-top: 1px solid #666;}}""")
     entries_margin = 4 if app_state.mini_mode else 8
     entries_layout.setContentsMargins(entries_margin, entries_margin, entries_margin, entries_margin)
     entries_layout.setSpacing(4 if app_state.mini_mode else 6)
@@ -1564,32 +1540,16 @@ def update_ui():
         button_min_height = int(40 * app_state.zoom_level)
         save_button = QtWidgets.QPushButton("💾 Speichern")
         save_button.setMinimumHeight(button_min_height)
-        save_button.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: #2e7d32;
-                color: white;
-                border: 1px solid {button_border_color};
-                border-radius: 6px;
-                padding: 8px 12px;
-                min-height: 10px;}}
-            QPushButton:hover {{background: #388e3c;}}"""
-        )
+        save_button.setStyleSheet(f"""
+            QPushButton {{background: #2e7d32;color: white;border: 1px solid {button_border_color};border-radius: 6px;padding: 8px 12px;min-height: 10px;}}
+            QPushButton:hover {{background: #388e3c;}}""")
         save_button.clicked.connect(save_data)
         bottom_bar_layout.addWidget(save_button)
         add_button = QtWidgets.QPushButton("➕ Eintrag hinzufügen")
         add_button.setMinimumHeight(button_min_height)
-        add_button.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {bbg};
-                color: {fg};
-                border: 1px solid {button_border_color};
-                border-radius: 6px;
-                padding: 8px 12px;
-                min-height: 10px;}}
-            QPushButton:hover {{background: {button_hover_bg};}}"""
-        )
+        add_button.setStyleSheet(f"""
+            QPushButton {{background: {bbg};color: {fg};border: 1px solid {button_border_color};border-radius: 6px;padding: 8px 12px;min-height: 10px;}}
+            QPushButton:hover {{background: {button_hover_bg};}}""")
         add_button.clicked.connect(add_new_entry)
         bottom_bar_layout.addWidget(add_button)
     else:
@@ -1608,23 +1568,19 @@ def update_ui():
         profile_names.append("SDE")
     def scaled(value):
         return max(1, int(value * app_state.zoom_level))
-
     selector_spacing = scaled(1 if app_state.mini_mode else 3)
-
     if profile_names:
         selector_container = QtWidgets.QWidget()
         selector_container.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         selector_layout = QtWidgets.QHBoxLayout(selector_container)
         selector_layout.setContentsMargins(0, 0, 0, 0)
         selector_layout.setSpacing(selector_spacing)
-        
         combo = ProfileComboBox()
         combo.setEditable(app_state.edit_mode)
         combo.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
         combo.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
         combo_height = scaled(24 if app_state.mini_mode else 32)
         combo.setFixedHeight(combo_height)
-
         if app_state.mini_mode:
             combo.setMinimumWidth(scaled(90))
             combo.setMaximumWidth(scaled(110))
@@ -1633,57 +1589,28 @@ def update_ui():
             combo.setMinimumWidth(scaled(140))
             combo.setMaximumWidth(scaled(200))
             drop_width = scaled(26)
-
-        radius = scaled(5)  # GEÄNDERT: Einheitliche Rundung für alle Buttons
+        radius = scaled(5)  
         padding_v = scaled(3 if app_state.mini_mode else 6)
         padding_h = scaled(8 if app_state.mini_mode else 14)
         border_color = "#555" if app_state.dark_mode else "#ccc"
         combo.setStyleSheet(f"""
-            QComboBox {{
-                background:{bbg};
-                color:{fg};
-
-                
-                border: 1px solid {border_color};
-                border-radius:{radius}px;
-                padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;}}
-            QComboBox::drop-down {{
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width:{drop_width}px;
-                border-left: 1px solid {border_color};
-                border-top-right-radius:{radius}px;
-                border-bottom-right-radius:{radius}px;
-                background:{bbg};
-                margin:0; padding:0;}}
-            QComboBox QAbstractItemView {{
-                background:{ebg};
-                color:{fg};
-                border: 1px solid {border_color};
-                selection-background-color:#4a90e2;
-                selection-color:white;}}""")
-        
+            QComboBox {{background:{bbg};color:{fg};border: 1px solid {border_color};border-radius:{radius}px;padding:{padding_v}px {drop_width + padding_v}px {padding_v}px {padding_h}px;}}
+            QComboBox::drop-down {{subcontrol-origin: padding;subcontrol-position: top right;width:{drop_width}px;border-left: 1px solid {border_color};border-top-right-radius:{radius}px;border-bottom-right-radius:{radius}px;background:{bbg};margin:0; padding:0;}}
+            QComboBox QAbstractItemView {{background:{ebg};color:{fg};border: 1px solid {border_color};selection-background-color:#4a90e2;selection-color:white;}}""")
         selector_layout.addWidget(combo)
         app_state.profile_selector = combo
-        
         delete_btn = None
         if app_state.edit_mode:
             delete_btn = QtWidgets.QPushButton("❌")
             btn_size = scaled(32) 
             delete_btn.setFixedSize(btn_size, btn_size)
-            delete_btn.setStyleSheet(
-                f"""
-                QPushButton {{
-                    background:{bbg}; color:{fg};
-                    color:white;
-                    border: 1px;
-                    border-radius: {radius}px;}}  
+            delete_btn.setStyleSheet(f"""
+                QPushButton {{background:{bbg}; color:{fg};color:white;border: 1px;border-radius: {radius}px;}}  
                 QPushButton:hover {{background: {'#666'};}}
                 QPushButton:pressed {{background:#b71c1c;}}""")
             delete_btn.setToolTip("Ausgewähltes Profil löschen")
             selector_layout.addWidget(delete_btn)
             app_state.profile_delete_button = delete_btn
-
         toolbar.addWidget(selector_container)
         for name in profile_names:
             combo.addItem(name, name)
@@ -1732,18 +1659,12 @@ def update_ui():
             elif combo.count() > 0:
                 combo.setCurrentIndex(0)
         update_delete_state()
-
     if app_state.edit_mode:
         ap = QtWidgets.QPushButton("➕ Profil")
         button_height = combo_height if profile_names else scaled(24 if app_state.mini_mode else 32)
         ap.setFixedHeight(button_height)
-        ap.setStyleSheet(
-            f"""
-            QPushButton {{
-                background:{bbg}; color:{fg};
-                border: 1px solid {border_color};
-                border-radius: 5px;
-                padding: 6px 16px;}}
+        ap.setStyleSheet(f"""
+            QPushButton {{background:{bbg}; color:{fg};border: 1px solid {border_color};border-radius: 5px;padding: 6px 16px;}}
             QPushButton:hover {{background:#666;}}""")
         ap.clicked.connect(add_new_profile)
         if profile_names:
@@ -1759,11 +1680,9 @@ def update_ui():
                 )
                 toolbar.addWidget(spacer)
         toolbar.addWidget(ap)
-        
     spacer = QtWidgets.QWidget()
     spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     toolbar.addWidget(spacer)
-    
     control_size = 26 if app_state.mini_mode else 30
     control_radius = 12 if app_state.mini_mode else 15
     control_margin = 4 if app_state.mini_mode else 6
@@ -1776,29 +1695,15 @@ def update_ui():
     for text, func, tooltip in controls:
         b = QtWidgets.QPushButton(text)
         b.setToolTip(tooltip)
-        b.setStyleSheet(
-            f"""
-            QPushButton {{
-                background:{bbg}; color:{fg};
-                border-radius: {control_radius}px;
-                min-width: {control_size}px; min-height: {control_size}px;
-                margin-left: {control_margin}px;
-                border: none;
-                padding: 0;}}
+        b.setStyleSheet(f"""
+            QPushButton {{background:{bbg}; color:{fg};border-radius: {control_radius}px;min-width: {control_size}px; min-height: {control_size}px;margin-left: {control_margin}px;border: none;padding: 0;}}
             QPushButton:hover {{background:#888;}}""")
         b.clicked.connect(func)
         toolbar.addWidget(b)
     help_btn = QtWidgets.QPushButton("❓")
     help_btn.setToolTip("Hilfe anzeigen")
-    help_btn.setStyleSheet(
-        f"""
-        QPushButton {{
-            background:{bbg}; color:{fg};
-            border-radius: {control_radius}px;
-            min-width: {control_size}px; min-height: {control_size}px;
-            margin-left: {control_margin}px;
-            border: none;
-            padding: 0;}}
+    help_btn.setStyleSheet(f"""
+        QPushButton {{background:{bbg}; color:{fg};border-radius: {control_radius}px;min-width: {control_size}px; min-height: {control_size}px;margin-left: {control_margin}px;border: none;padding: 0;}}
         QPushButton:hover {{background:#888;}}""")
     help_btn.clicked.connect(show_help_dialog)
     toolbar.addWidget(help_btn)
@@ -1816,24 +1721,10 @@ def update_ui():
             mini_button = QtWidgets.QPushButton()
             mini_hotkey_color = '#d0d0d0' if app_state.dark_mode else '#333333'
             mini_button.setStyleSheet(f"""
-                QPushButton {{
-                    background: {ebg};
-                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                    border-radius: 6px;
-                    padding: 1px 4px;}}
-                QPushButton:hover {{
-                    background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}
-                QPushButton QLabel {{
-                    color: {fg};
-                    font-weight: bold;
-                    background: transparent;
-                    padding: 0;}}
-                QPushButton QLabel#miniHotkeyLabel {{
-                    font-weight: normal;
-                    padding-left: 4px;
-                    padding-right: 2px;
-                    font-size: 12px;
-                    color: {mini_hotkey_color};}}""")
+                QPushButton {{background: {ebg};border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 6px;padding: 1px 4px;}}
+                QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}
+                QPushButton QLabel {{color: {fg};font-weight: bold;background: transparent;padding: 0;}}
+                QPushButton QLabel#miniHotkeyLabel {{font-weight: normal;padding-left: 4px;padding-right: 2px;font-size: 12px;color: {mini_hotkey_color};}}""")
             mini_button.setFixedHeight(int(30 * app_state.zoom_level))
             mini_button.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
             mini_layout = QtWidgets.QHBoxLayout()
@@ -1872,13 +1763,7 @@ def update_ui():
         if app_state.edit_mode:
             drag_handle = QtWidgets.QLabel("☰")
             drag_handle.setFixedSize(20, 28)
-            drag_handle.setStyleSheet(f"""
-                color: {fg}; 
-                background: {bbg}; 
-                padding: 2px 4px;
-                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                border-radius: 4px;
-                text-align: center;""")
+            drag_handle.setStyleSheet(f"""color: {fg}; background: {bbg}; padding: 2px 4px;border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 4px;text-align: center;""")
             drag_handle.setAlignment(QtCore.Qt.AlignCenter)
             drag_handle.setToolTip("Ziehen zum Verschieben")
             row.drag_index = i
@@ -1915,13 +1800,7 @@ def update_ui():
             lt = QtWidgets.QLabel(title)
             lt.setFixedWidth(max_t)
             lt.setFixedHeight(40)
-            lt.setStyleSheet(f"""
-                color: {fg}; 
-                background: {ebg}; 
-                font-weight: bold; 
-                padding: 10px 12px;
-                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                border-radius: 6px;""")
+            lt.setStyleSheet(f"""color: {fg}; background: {ebg}; font-weight: bold; padding: 10px 12px;border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 6px;""")
             lt.setAlignment(QtCore.Qt.AlignVCenter)
             hl.addWidget(lt)
         if app_state.edit_mode:
@@ -1986,12 +1865,7 @@ def update_ui():
             delete_size = int(38 * app_state.zoom_level)
             delete_btn.setFixedSize(delete_size, delete_size)
             delete_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {ebg};
-                    color: {fg};
-                    border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                    border-radius: 6px;
-                    padding: 8px;}}
+                QPushButton {{background: {ebg};color: {fg};border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 6px;padding: 8px;}}
                 QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}
                 QPushButton:pressed {{background: {'#3a3a3a' if app_state.dark_mode else '#e0e0e0'};}}""")
             delete_btn.clicked.connect(lambda _, j=i: delete_entry(j))
@@ -2000,14 +1874,7 @@ def update_ui():
         else:
             lh = QtWidgets.QLabel(hks[i])
             lh.setFixedHeight(40)
-            lh.setStyleSheet(f"""
-                color: {fg}; 
-                background: {ebg}; 
-                padding: 8px 16px;  
-                min-width: 120px;  
-                border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};
-                border-radius: 6px;
-                font-family: 'Consolas', 'Monaco', monospace;""")
+            lh.setStyleSheet(f"""color: {fg}; background: {ebg}; padding: 8px 16px;  min-width: 120px;  border: 1px solid {'#555' if app_state.dark_mode else '#ccc'};border-radius: 6px;font-family: 'Consolas', 'Monaco', monospace;""")
             lh.setAlignment(QtCore.Qt.AlignCenter)
             hl.addWidget(lh)
         entries_layout.addWidget(row)
@@ -2040,46 +1907,17 @@ def show_help_dialog():
 def apply_dark_mode_to_messagebox(msg):
     if app_state.dark_mode:
         msg.setStyleSheet("""
-            QMessageBox {
-                background-color: #2e2e2e;
-                color: white;}
-            QMessageBox QLabel {
-                color: white !important;}
-            QMessageBox QPushButton {
-                background-color: #444 !important;
-                color: white !important;
-                border: 1px solid #666;
-                border-radius: 5px;
-                min-width: 60px;
-                min-height: 24px;
-                padding: 4px 8px;
-                font-weight: normal;}
-            QMessageBox QPushButton:hover {
-                background-color: #666 !important;
-                color: white !important;}
-            QMessageBox QPushButton:pressed {
-                background-color: #555 !important;
-                color: white !important;}
-            QMessageBox QPushButton:focus {
-                background-color: #4a90e2 !important;
-                color: white !important;
-                border: 1px solid #5aa3f0;}""")
+            QMessageBox {background-color: #2e2e2e;color: white;}
+            QMessageBox QLabel {color: white !important;}
+            QMessageBox QPushButton {background-color: #444 !important;color: white !important;border: 1px solid #666;border-radius: 5px;min-width: 60px;min-height: 24px;padding: 4px 8px;font-weight: normal;}
+            QMessageBox QPushButton:hover {background-color: #666 !important;color: white !important;}
+            QMessageBox QPushButton:pressed {background-color: #555 !important;color: white !important;}
+            QMessageBox QPushButton:focus {background-color: #4a90e2 !important;color: white !important;border: 1px solid #5aa3f0;}""")
         for button in msg.findChildren(QtWidgets.QPushButton):
             button.setStyleSheet("""
-                QPushButton {
-                    background-color: #444;
-                    color: white !important;
-                    border: 1px solid #666;
-                    border-radius: 5px;
-                    min-width: 60px;
-                    min-height: 24px;
-                    padding: 4px 8px;}
-                QPushButton:hover {
-                    background-color: #666;
-                    color: white !important;}
-                QPushButton:pressed {
-                    background-color: #555;
-                    color: white !important;}""")
+                QPushButton {background-color: #444;color: white !important;border: 1px solid #666;border-radius: 5px;min-width: 60px;min-height: 24px;padding: 4px 8px;}
+                QPushButton:hover {background-color: #666;color: white !important;}
+                QPushButton:pressed {background-color: #555;color: white !important;}""")
 
 def show_critical_message(title, text, parent=None):
     if parent is None:
