@@ -1245,21 +1245,27 @@ def confirm_and_then(action_if_yes):
 def adjust_zoom(delta):
     """Zoom-Level anpassen mit CTRL+Mausrad"""
     try:
-        step = 0.05 if delta > 0 else -0.05  
+        step = 0.05 if delta > 0 else -0.05
         new_zoom = round(app_state.zoom_level + step, 2)
         new_zoom = max(0.7, min(1.5, new_zoom))
         if abs(new_zoom - app_state.zoom_level) > 0.01:
+            old_zoom = app_state.zoom_level
             app_state.zoom_level = new_zoom
-            app_instance = QtWidgets.QApplication.instance()
-            if app_instance:
-                font_size = max(8, int(round(DEFAULT_FONT_SIZE * app_state.zoom_level)))
-                font = app_instance.font()
-                font.setPointSize(font_size)
-                app_instance.setFont(font)
-            if hasattr(win, 'statusBar'):
-                zoom_percent = int(new_zoom * 100)
-                win.statusBar().showMessage(f"Zoom: {zoom_percent}%", 2000)
-            logging.info(f"Zoom adjusted to {zoom_percent}%")
+            try:
+                app_instance = QtWidgets.QApplication.instance()
+                if app_instance:
+                    font_size = max(8, int(round(DEFAULT_FONT_SIZE * app_state.zoom_level)))
+                    font = app_instance.font()
+                    font.setPointSize(font_size)
+                    app_instance.setFont(font)
+                update_ui()
+                if hasattr(win, 'statusBar'):
+                    zoom_percent = int(new_zoom * 100)
+                    win.statusBar().showMessage(f"Zoom: {zoom_percent}%", 2000)
+                logging.info(f"Zoom adjusted to {zoom_percent}%")
+            except Exception as rebuild_error:
+                logging.error(f"Error rebuilding UI after zoom: {rebuild_error}")
+                app_state.zoom_level = old_zoom
     except Exception as e:
         logging.error(f"Error in adjust_zoom: {e}")
 
@@ -1333,7 +1339,7 @@ def create_text_button(i, texts, hks, ebg, fg):
             border-radius: 6px;}}
         QPushButton:hover {{background: {'#4a4a4a' if app_state.dark_mode else '#f0f0f0'};}}""")
     text_btn.setObjectName("qp_text_btn")  
-    text_btn.setFixedHeight(int(40 * app_state.zoom_level))
+    text_btn.setFixedHeight(40)
     text_btn.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
     text_btn.setToolTip(f"Klicken zum Kopieren • Hotkey: {hks[i] if i < len(hks) else ''}")
     def update_button_text():
@@ -1376,12 +1382,25 @@ def initialize_application():
 app = initialize_application()
 win = QtWidgets.QMainWindow()
 class MainWindowEventFilter(QtCore.QObject):
+    def __init__(self):
+        super().__init__()
+        self.zoom_timer = QtCore.QTimer()
+        self.zoom_timer.setSingleShot(True)
+        self.zoom_timer.setInterval(100)
+        self.pending_delta = 0
+        self.zoom_timer.timeout.connect(self._apply_zoom)
+    def _apply_zoom(self):
+        """Führe gesammelte Zoom-Änderungen aus"""
+        if self.pending_delta != 0:
+            adjust_zoom(self.pending_delta)
+            self.pending_delta = 0
     def eventFilter(self, obj, event):
         try:
             if event.type() == QtCore.QEvent.Wheel:
                 modifiers = QtWidgets.QApplication.keyboardModifiers()
                 if modifiers == QtCore.Qt.ControlModifier:
-                    adjust_zoom(event.angleDelta().y())
+                    self.pending_delta += event.angleDelta().y()
+                    self.zoom_timer.start()
                     event.accept()
                     return True 
         except Exception as e:
@@ -1389,6 +1408,8 @@ class MainWindowEventFilter(QtCore.QObject):
         return super().eventFilter(obj, event)
 main_event_filter = MainWindowEventFilter()
 win.setWindowTitle("QuickPaste")
+
+
 win.setMinimumSize(399, 100)
 app_state.normal_minimum_width = win.minimumWidth()
 win.setWindowIcon(QtGui.QIcon(ICON_PATH) if os.path.exists(ICON_PATH) else win.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon))
