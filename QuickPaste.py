@@ -20,7 +20,6 @@ LOG_FILE = os.path.join(APPDATA_PATH, "qp.log")
 logging.basicConfig(filename=LOG_FILE, filemode="a", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", encoding="utf-8")
 BASE_DIR = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
 ICON_PATH = os.path.join(BASE_DIR, "assets", "H.ico")
-
 DEFAULT_FONT_SIZE = 5 
 
 class QuickPasteState:
@@ -131,13 +130,12 @@ class DebouncedSaver:
         if self.timer.isActive():
             self.timer.stop()
         try:
-            # Shallow copy der obersten Ebene reicht für deine Datenstruktur
             self.pending_data = {
                 "profiles": {k: v.copy() for k, v in data.get("profiles", {}).items()},
                 "active_profile": data.get("active_profile")
             }
         except Exception:
-            self.pending_data = copy.deepcopy(data)  # Nur als Fallback
+            self.pending_data = copy.deepcopy(data) 
         self.timer.start()
 
     def _save(self):
@@ -315,7 +313,6 @@ def has_field_changes(profile_to_check=None):
     profiles = app_state.data.get("profiles", {})
     if profile_to_check not in profiles:
         return False
-
     rename_changed = False
     if app_state.profile_entries:
         for old_name, entry in app_state.profile_entries.items():
@@ -328,7 +325,6 @@ def has_field_changes(profile_to_check=None):
             if new_name != _normalize_title(old_name):
                 rename_changed = True
                 break
-
     titles, texts, hks = [], [], []
     for i in range(entries_layout.count()):
         item = entries_layout.itemAt(i)
@@ -342,15 +338,12 @@ def has_field_changes(profile_to_check=None):
                 titles.append(line_edits[0].text())
                 texts.append(text_edits[0].toHtml())
                 hks.append(line_edits[1].text())
-
     normalized_titles = [_normalize_title(t) for t in titles]
     normalized_texts = [_normalize_rich_text(t) for t in texts]
     normalized_hotkeys = [_normalize_hotkey(h) for h in hks]
-
     reference_profile = None
     if isinstance(app_state.last_ui_data, dict):
         reference_profile = app_state.last_ui_data.get(profile_to_check)
-
     if reference_profile is None:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -358,19 +351,15 @@ def has_field_changes(profile_to_check=None):
             reference_profile = persisted.get("profiles", {}).get(profile_to_check)
         except (FileNotFoundError, json.JSONDecodeError):
             pass
-
     if reference_profile is None:
         reference_profile = {}
-
     stored_titles = [_normalize_title(t) for t in reference_profile.get("titles", [])]
     stored_texts = [_normalize_rich_text(t) for t in reference_profile.get("texts", [])]
     stored_hotkeys = [_normalize_hotkey(h) for h in reference_profile.get("hotkeys", [])]
-
     fields_changed = (
         normalized_titles != stored_titles
         or normalized_texts != stored_texts
         or normalized_hotkeys != stored_hotkeys)
-
     changed = rename_changed or fields_changed
     if not changed:
         app_state.unsaved_changes = False
@@ -475,7 +464,6 @@ def update_profile_buttons():
             and data not in (None, "SDE"))
         delete_btn.setEnabled(can_delete)
 
-
 def switch_profile(profile_name):
     if profile_name == app_state.active_profile:
         return
@@ -579,8 +567,6 @@ class ClipboardManager:
             except Exception:
                 process_events_for(10)
         return self
-    
-
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.clipboard_opened:
             try:
@@ -687,7 +673,6 @@ def release_all_modifier_keys(callback=None, delay_before_callback_ms=50):
         modifiers = (0x11, 0x10, 0x12, 0x5B, 0x5C)
         iterations = 3
         interval_ms = 10
-
         def run_iteration(iteration):
             for vk in modifiers:
                 try:
@@ -698,7 +683,6 @@ def release_all_modifier_keys(callback=None, delay_before_callback_ms=50):
                 QtCore.QTimer.singleShot(interval_ms, lambda: run_iteration(iteration + 1))
             elif callback is not None:
                 QtCore.QTimer.singleShot(max(0, int(delay_before_callback_ms)), callback)
-
         QtCore.QTimer.singleShot(0, lambda: run_iteration(0))
     except Exception as e:
         logging.warning(f"Error releasing modifier keys (WinAPI): {e}")
@@ -712,7 +696,6 @@ def insert_text(index):
         user32.keybd_event(0x56, 0, 0, 0)
         user32.keybd_event(0x56, 0, 2, 0)
         user32.keybd_event(0x11, 0, 2, 0)
-
     def schedule_ctrl_v():
         def perform_paste():
             try:
@@ -720,9 +703,7 @@ def insert_text(index):
             finally:
                 QtCore.QTimer.singleShot(50, release_all_modifier_keys)
             logging.info(f"Successfully inserted text for index {index}")
-
         release_all_modifier_keys(callback=perform_paste, delay_before_callback_ms=0)
-
     try:
         txt = app_state.data["profiles"][app_state.active_profile]["texts"][index]
         logging.info(f"Inserting text for index {index}: {txt[:50]}...")
@@ -991,11 +972,7 @@ def start_drag(event, index, widget):
     if hasattr(row_widget, 'highlight_drop_zone'):
         original_style = row_widget.styleSheet()
         row_widget.setStyleSheet(f"""
-            QWidget {{
-                background-color: {'#1a1a1a' if app_state.dark_mode else '#f0f0f0'};
-                opacity: 0.6;
-                border: 1px dashed {'#666' if app_state.dark_mode else '#999'};
-                border-radius: 6px;}}""")
+            QWidget {{background-color: {'#1a1a1a' if app_state.dark_mode else '#f0f0f0'};opacity: 0.6;border: 1px dashed {'#666' if app_state.dark_mode else '#999'};border-radius: 6px;}}""")
     drag = QtGui.QDrag(widget)
     mime_data = QtCore.QMimeData()
     mime_data.setText(str(index))
